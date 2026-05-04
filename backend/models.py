@@ -18,7 +18,7 @@ class Client(Base):
     intake_token = Column(String, unique=True, default=_uuid)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    pet_profile = relationship("PetProfile", back_populates="client", uselist=False)
+    pet_profiles = relationship("PetProfile", back_populates="client")
     bookings = relationship("Booking", back_populates="client")
     vaccine_submissions = relationship("VaccineSubmission", back_populates="client")
 
@@ -38,7 +38,9 @@ class PetProfile(Base):
     profile_complete = Column(Boolean, default=False)
     completed_at = Column(DateTime)
 
-    client = relationship("Client", back_populates="pet_profile")
+    client = relationship("Client", back_populates="pet_profiles")
+    bookings = relationship("Booking", back_populates="pet")
+    vaccine_submissions = relationship("VaccineSubmission", back_populates="pet")
 
 
 class Booking(Base):
@@ -46,6 +48,7 @@ class Booking(Base):
 
     id = Column(String, primary_key=True, default=_uuid)
     client_id = Column(String, ForeignKey("clients.id"), nullable=False)
+    pet_id = Column(String, ForeignKey("pet_profiles.id"), nullable=True)
     appointment_date = Column(DateTime)
     service_type = Column(String, default="Full Groom")
     status = Column(String, default="pending_payment")
@@ -54,6 +57,7 @@ class Booking(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     client = relationship("Client", back_populates="bookings")
+    pet = relationship("PetProfile", back_populates="bookings")
 
 
 class VaccineSubmission(Base):
@@ -61,6 +65,7 @@ class VaccineSubmission(Base):
 
     id = Column(String, primary_key=True, default=_uuid)
     client_id = Column(String, ForeignKey("clients.id"), nullable=False)
+    pet_id = Column(String, ForeignKey("pet_profiles.id"), nullable=True)
     image_filename = Column(String)
     ai_expiry = Column(String)
     confirmed_expiry = Column(String)
@@ -68,6 +73,7 @@ class VaccineSubmission(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     client = relationship("Client", back_populates="vaccine_submissions")
+    pet = relationship("PetProfile", back_populates="vaccine_submissions")
 
 
 class GroomerSettings(Base):

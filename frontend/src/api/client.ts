@@ -18,8 +18,8 @@ export interface BookingResponse {
   message: string;
 }
 
-export interface ProfileData {
-  client_name: string;
+export interface PetData {
+  id: string;
   pet_name: string | null;
   breed: string | null;
   age: string | null;
@@ -28,6 +28,20 @@ export interface ProfileData {
   notes: string | null;
   rabies_expiry: string | null;
   profile_complete: boolean;
+}
+
+export interface PetFormData {
+  pet_name?: string | null;
+  breed?: string | null;
+  age?: string | null;
+  weight?: string | null;
+  emergency_contact?: string | null;
+  notes?: string | null;
+}
+
+export interface ProfileData {
+  client_name: string;
+  pets: PetData[];
 }
 
 export interface VaccineResult {
@@ -58,11 +72,8 @@ export interface ClientData {
   name: string;
   phone: string;
   intake_token: string;
-  pet_name: string | null;
-  breed: string | null;
+  pets: PetData[];
   vaccine_ok: boolean;
-  rabies_expiry: string | null;
-  profile_complete: boolean;
   last_visit: string | null;
 }
 
@@ -92,13 +103,26 @@ export const api = {
 
   getProfile: (token: string) => request<ProfileData>(`/profile/${token}`),
 
-  saveProfile: (token: string, data: Omit<ProfileData, "client_name" | "rabies_expiry" | "profile_complete">) =>
+  saveProfile: (token: string, data: PetFormData) =>
     request<{ success: boolean }>(`/profile/${token}`, { method: "PUT", body: JSON.stringify(data) }),
 
-  uploadVaccine: async (token: string, file: File): Promise<VaccineResult> => {
+  addPet: (token: string, data: PetFormData) =>
+    request<{ success: boolean; pet_id: string }>(`/profile/${token}/pets`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updatePet: (token: string, petId: string, data: PetFormData) =>
+    request<{ success: boolean }>(`/profile/${token}/pets/${petId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  uploadVaccine: async (token: string, file: File, petId?: string): Promise<VaccineResult> => {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`/api/vaccine/${token}`, { method: "POST", body: form });
+    const url = petId ? `/api/vaccine/${token}?pet_id=${petId}` : `/api/vaccine/${token}`;
+    const res = await fetch(url, { method: "POST", body: form });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },

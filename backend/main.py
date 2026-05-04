@@ -6,7 +6,7 @@ from typing import Optional
 
 import stripe
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,7 +36,6 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:4001")
 
-# Serve uploaded vaccine images
 _UPLOADS = Path(__file__).parent / "uploads"
 _UPLOADS.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_UPLOADS)), name="uploads")
@@ -103,6 +102,19 @@ def _get_settings(db: Session) -> GroomerSettings:
         db.refresh(s)
     return s
 
+def _pet_dict(pet: PetProfile) -> dict:
+    return {
+        "id": pet.id,
+        "pet_name": pet.pet_name,
+        "breed": pet.breed,
+        "age": pet.age,
+        "weight": pet.weight,
+        "emergency_contact": pet.emergency_contact,
+        "notes": pet.notes,
+        "rabies_expiry": pet.rabies_expiry,
+        "profile_complete": pet.profile_complete,
+    }
+
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
@@ -160,7 +172,7 @@ def get_today_appointments(db: Session = Depends(get_db)):
     result = []
     for b in bookings:
         c = b.client
-        pet = c.pet_profile if c else None
+        pet = b.pet or (c.pet_profiles[0] if c and c.pet_profiles else None)
         v_ok = _vaccine_ok(pet)
         deposit_ok = b.status in ("confirmed", "completed", "in_progress")
         result.append({
@@ -195,8 +207,8 @@ async def quick_booking(req: QuickBookingRequest, db: Session = Depends(get_db))
         db.flush()
         pet = PetProfile(id=uuid.uuid4().hex, client_id=client.id, pet_name=req.pet_name or None)
         db.add(pet)
-    elif req.pet_name and client.pet_profile:
-        client.pet_profile.pet_name = req.pet_name
+    elif req.pet_name and client.pet_profiles:
+        client.pet_profiles[0].pet_name = req.pet_name
 
     appt_dt = datetime.combine(date.today(), dt_time(9, 0))
     if req.appointment_time:
@@ -241,7 +253,7 @@ async def text_client(booking_id: str, db: Session = Depends(get_db)):
     if not b:
         raise HTTPException(status_code=404, detail="Not found")
     c = b.client
-    pet = c.pet_profile if c else None
+    pet = b.pet or (c.pet_profiles[0] if c and c.pet_profiles else None)
     missing = []
     if not pet or not pet.profile_complete:
         missing.append("complete their profile")
@@ -270,7 +282,6 @@ def get_clients(db: Session = Depends(get_db)):
     clients = db.query(Client).order_by(Client.created_at.desc()).all()
     result = []
     for c in clients:
-        pet = c.pet_profile
         last = (
             db.query(Booking)
             .filter(Booking.client_id == c.id)
@@ -282,11 +293,8 @@ def get_clients(db: Session = Depends(get_db)):
             "name": c.name,
             "phone": c.phone,
             "intake_token": c.intake_token,
-            "pet_name": pet.pet_name if pet else None,
-            "breed": pet.breed if pet else None,
-            "vaccine_ok": _vaccine_ok(pet),
-            "rabies_expiry": pet.rabies_expiry if pet else None,
-            "profile_complete": pet.profile_complete if pet else False,
+            "pets": [_pet_dict(p) for p in c.pet_profiles],
+            "vaccine_ok": any(_vaccine_ok(p) for p in c.pet_profiles),
             "last_visit": last.created_at.isoformat() if last else None,
         })
     return result
@@ -299,26 +307,19 @@ def get_profile(token: str, db: Session = Depends(get_db)):
     c = db.query(Client).filter(Client.intake_token == token).first()
     if not c:
         raise HTTPException(status_code=404, detail="Profile not found")
-    pet = c.pet_profile
     return {
         "client_name": c.name,
-        "pet_name": pet.pet_name if pet else None,
-        "breed": pet.breed if pet else None,
-        "age": pet.age if pet else None,
-        "weight": pet.weight if pet else None,
-        "emergency_contact": pet.emergency_contact if pet else None,
-        "notes": pet.notes if pet else None,
-        "rabies_expiry": pet.rabies_expiry if pet else None,
-        "profile_complete": pet.profile_complete if pet else False,
+        "pets": [_pet_dict(p) for p in c.pet_profiles],
     }
 
 
 @app.put("/api/profile/{token}")
 def update_profile(token: str, data: ProfileUpdate, db: Session = Depends(get_db)):
+    """Backward-compat: edits the first pet (or creates one)."""
     c = db.query(Client).filter(Client.intake_token == token).first()
     if not c:
         raise HTTPException(status_code=404, detail="Profile not found")
-    pet = c.pet_profile
+    pet = c.pet_profiles[0] if c.pet_profiles else None
     if not pet:
         pet = PetProfile(id=uuid.uuid4().hex, client_id=c.id)
         db.add(pet)
@@ -330,18 +331,60 @@ def update_profile(token: str, data: ProfileUpdate, db: Session = Depends(get_db
     return {"success": True}
 
 
+@app.post("/api/profile/{token}/pets")
+def add_pet(token: str, data: ProfileUpdate, db: Session = Depends(get_db)):
+    c = db.query(Client).filter(Client.intake_token == token).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    pet = PetProfile(id=uuid.uuid4().hex, client_id=c.id)
+    for field in ("pet_name", "breed", "age", "weight", "emergency_contact", "notes"):
+        setattr(pet, field, getattr(data, field))
+    pet.profile_complete = True
+    pet.completed_at = datetime.utcnow()
+    db.add(pet)
+    db.commit()
+    db.refresh(pet)
+    return {"success": True, "pet_id": pet.id}
+
+
+@app.put("/api/profile/{token}/pets/{pet_id}")
+def update_pet(token: str, pet_id: str, data: ProfileUpdate, db: Session = Depends(get_db)):
+    c = db.query(Client).filter(Client.intake_token == token).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    pet = db.query(PetProfile).filter(PetProfile.id == pet_id, PetProfile.client_id == c.id).first()
+    if not pet:
+        raise HTTPException(status_code=404, detail="Pet not found")
+    for field in ("pet_name", "breed", "age", "weight", "emergency_contact", "notes"):
+        setattr(pet, field, getattr(data, field))
+    pet.profile_complete = True
+    pet.completed_at = datetime.utcnow()
+    db.commit()
+    return {"success": True}
+
+
 # ── Vaccine upload (customer-facing) ──────────────────────────────────────────
 
 @app.post("/api/vaccine/{token}")
-async def upload_vaccine(token: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_vaccine(
+    token: str,
+    file: UploadFile = File(...),
+    pet_id: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
     c = db.query(Client).filter(Client.intake_token == token).first()
     if not c:
         raise HTTPException(status_code=404, detail="Profile not found")
 
+    pet = None
+    if pet_id:
+        pet = db.query(PetProfile).filter(PetProfile.id == pet_id, PetProfile.client_id == c.id).first()
+    if not pet and c.pet_profiles:
+        pet = c.pet_profiles[0]
+
     image_bytes = await file.read()
     media_type = file.content_type or "image/jpeg"
 
-    # Save image for groomer vault review
     ext = (file.filename or "cert.jpg").rsplit(".", 1)[-1]
     filename = f"{uuid.uuid4().hex}.{ext}"
     (_UPLOADS / filename).write_bytes(image_bytes)
@@ -354,23 +397,21 @@ async def upload_vaccine(token: str, file: UploadFile = File(...), db: Session =
     submission = VaccineSubmission(
         id=uuid.uuid4().hex,
         client_id=c.id,
+        pet_id=pet.id if pet else None,
         image_filename=filename,
         ai_expiry=result.get("rabies_expiry"),
         status="needs_retake" if result.get("needs_review") else "pending",
     )
     db.add(submission)
 
-    if not result.get("needs_review"):
-        pet = c.pet_profile
-        if pet and result.get("rabies_expiry"):
-            pet.rabies_expiry = result["rabies_expiry"]
+    if not result.get("needs_review") and pet and result.get("rabies_expiry"):
+        pet.rabies_expiry = result["rabies_expiry"]
 
     db.commit()
 
     if result.get("needs_review"):
         try:
-            pet = c.pet_profile
-            send_vaccine_review_request(c.phone, pet.pet_name or "your pet", token)
+            send_vaccine_review_request(c.phone, pet.pet_name if pet else "your pet", token)
         except Exception:
             pass
         return {"rabies_expiry": None, "needs_review": True, "message": "Image unclear — please retake"}
@@ -391,7 +432,7 @@ def get_vault(db: Session = Depends(get_db)):
     result = []
     for s in submissions:
         c = s.client
-        pet = c.pet_profile if c else None
+        pet = s.pet or (c.pet_profiles[0] if c and c.pet_profiles else None)
         result.append({
             "id": s.id,
             "client_name": c.name if c else "Unknown",
@@ -411,9 +452,13 @@ def confirm_vaccine(submission_id: str, body: VaccineConfirmBody, db: Session = 
         raise HTTPException(status_code=404, detail="Not found")
     s.confirmed_expiry = body.expiry
     s.status = "confirmed"
-    c = s.client
-    if c and c.pet_profile:
-        c.pet_profile.rabies_expiry = body.expiry
+    target_pet = s.pet
+    if not target_pet:
+        c = s.client
+        if c and c.pet_profiles:
+            target_pet = c.pet_profiles[0]
+    if target_pet:
+        target_pet.rabies_expiry = body.expiry
     db.commit()
     return {"success": True}
 

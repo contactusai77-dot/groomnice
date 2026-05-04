@@ -11,10 +11,13 @@ export default function Clients() {
     api.getClients().then(setClients).finally(() => setLoading(false));
   }, []);
 
-  const filtered = clients.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.pet_name?.toLowerCase().includes(search.toLowerCase()) ?? false)
-  );
+  const filtered = clients.filter((c) => {
+    const q = search.toLowerCase();
+    return (
+      c.name.toLowerCase().includes(q) ||
+      c.pets.some((p) => p.pet_name?.toLowerCase().includes(q))
+    );
+  });
 
   return (
     <div className="min-h-screen bg-gray-50 pb-28">
@@ -27,7 +30,7 @@ export default function Clients() {
         <input
           type="search"
           value={search}
-          onChange={e => setSearch(e.target.value)}
+          onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name or pet…"
           className="w-full bg-white border border-gray-200 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 mb-4"
         />
@@ -41,7 +44,7 @@ export default function Clients() {
           </div>
         ) : (
           <div className="space-y-2">
-            {filtered.map(c => <ClientRow key={c.id} client={c} />)}
+            {filtered.map((c) => <ClientRow key={c.id} client={c} />)}
           </div>
         )}
       </div>
@@ -50,8 +53,20 @@ export default function Clients() {
 }
 
 function ClientRow({ client: c }: { client: ClientData }) {
-  const expiry = c.rabies_expiry
-    ? new Date(c.rabies_expiry).toLocaleDateString("en-US", { month: "short", year: "numeric" })
+  const firstPet = c.pets[0] ?? null;
+  const petLabel = firstPet?.pet_name
+    ? c.pets.length > 1
+      ? `${firstPet.pet_name} +${c.pets.length - 1} more`
+      : firstPet.pet_name
+    : null;
+  const breedLabel = c.pets.length === 1 && firstPet?.breed ? ` · ${firstPet.breed}` : "";
+
+  const worstExpiry = c.pets
+    .map((p) => p.rabies_expiry)
+    .filter(Boolean)
+    .sort()[0] ?? null;
+  const expiry = worstExpiry
+    ? new Date(worstExpiry).toLocaleDateString("en-US", { month: "short", year: "numeric" })
     : null;
 
   return (
@@ -67,9 +82,9 @@ function ClientRow({ client: c }: { client: ClientData }) {
             ? <CheckCircle size={13} className="text-green-500 shrink-0" />
             : <AlertCircle size={13} className="text-red-400 shrink-0" />}
         </div>
-        {c.pet_name && (
+        {petLabel && (
           <p className="text-sm text-gray-500 truncate">
-            🐾 {c.pet_name}{c.breed ? ` · ${c.breed}` : ""}
+            🐾 {petLabel}{breedLabel}
           </p>
         )}
         {expiry
