@@ -136,13 +136,13 @@ print(f"  Groomer settings")
 print()
 print("Appointment breakdown:")
 labels = [
-    "09:00  Jane   / Biscuit  - Full Groom   [confirmed]     <- Ready ✅",
-    "10:00  Marco  / Luna     - Bath & Cut   [confirmed]     <- Vaccine EXPIRED 🔴",
-    "10:30  Ashley / Mochi    - Nail Trim    [pending_pay]   <- No vaccine + no deposit 🔴",
-    "11:30  Tom    / Rex      - Full Groom   [confirmed]     <- Ready ✅",
-    "13:00  Priya  / Coco     - Bath         [in_progress]   <- Grooming now 🔵",
-    "14:30  Derek  / Baxter   - Bath & Cut   [pending_pay]   <- No vaccine 🔴",
-    "15:30  Jane   / Pepper   - Bath & Cut   [confirmed]     <- Ready ✅ (multi-pet demo)",
+    "09:00  Jane   / Biscuit  - Full Groom   [confirmed]      <- Ready",
+    "10:00  Marco  / Luna     - Bath & Cut   [confirmed]      <- Vaccine EXPIRED",
+    "10:30  Ashley / Mochi    - Nail Trim    [pending_pay]    <- No vaccine + no deposit",
+    "11:30  Tom    / Rex      - Full Groom   [confirmed]      <- Ready",
+    "13:00  Priya  / Coco     - Bath         [in_progress]    <- Grooming now",
+    "14:30  Derek  / Baxter   - Bath & Cut   [pending_pay]    <- No vaccine",
+    "15:30  Jane   / Pepper   - Bath & Cut   [confirmed]      <- Ready (multi-pet demo)",
 ]
 for label in labels:
     print(f"  {label}")
