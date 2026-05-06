@@ -135,13 +135,10 @@ export const api = {
     pet_name: string;
     service_type: string;
     appointment_time: string;
-  }) => request<{ booking_id: string }>("/bookings/quick", { method: "POST", body: JSON.stringify(data) }),
+  }) => request<{ booking_id: string; intake_token: string }>("/bookings/quick", { method: "POST", body: JSON.stringify(data) }),
 
   updateBookingStatus: (id: string, status: string) =>
     request<{ success: boolean }>(`/bookings/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
-
-  textClient: (id: string) =>
-    request<{ success: boolean; message: string }>(`/bookings/${id}/text-client`, { method: "POST" }),
 
   // Clients
   getClients: () => request<ClientData[]>("/clients"),

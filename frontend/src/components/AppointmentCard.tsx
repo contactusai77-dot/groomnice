@@ -23,8 +23,9 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
     ? new Date(a.appointment_date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "TBD";
 
-  async function handleText() {
-    try { await api.textClient(a.id); } catch { /* graceful */ }
+  function handleText() {
+    const body = encodeURIComponent(`Hi ${a.client_name}! Just a reminder about your grooming appointment today. See you soon!`);
+    window.open(`sms:${a.client_phone}?body=${body}`);
   }
 
   async function handleToggleGroom() {

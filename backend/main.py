@@ -17,12 +17,6 @@ load_dotenv()
 
 from database import Base, engine, get_db
 from models import Booking, Client, GroomerSettings, PetProfile, VaccineSubmission
-from services.sms import (
-    send_booking_confirmation,
-    send_intake_link,
-    send_sms_raw,
-    send_vaccine_review_request,
-)
 from services.vision import extract_vaccine_info
 
 Base.metadata.create_all(bind=engine)
@@ -135,13 +129,6 @@ async def create_booking(req: BookingRequest, db: Session = Depends(get_db)):
                       appointment_date=datetime.combine(date.today(), dt_time(9, 0)))
     db.add(booking)
     db.commit()
-
-    try:
-        send_intake_link(phone, client.name, client.intake_token)
-        send_booking_confirmation(phone, client.name)
-    except Exception as e:
-        print(f"[sms] Skipped — {e}")
-
     return {"booking_id": booking.id, "message": "Booking created"}
 
 
@@ -214,12 +201,6 @@ async def quick_booking(req: QuickBookingRequest, db: Session = Depends(get_db))
     db.add(booking)
     db.flush()
     db.commit()
-
-    try:
-        send_intake_link(phone, client.name, client.intake_token)
-    except Exception as e:
-        print(f"[sms] Skipped — {e}")
-
     return {"booking_id": booking.id, "intake_token": client.intake_token}
 
 
@@ -232,33 +213,6 @@ def update_status(booking_id: str, body: StatusUpdate, db: Session = Depends(get
     db.commit()
     return {"success": True}
 
-
-@app.post("/api/bookings/{booking_id}/text-client")
-async def text_client(booking_id: str, db: Session = Depends(get_db)):
-    b = db.query(Booking).filter(Booking.id == booking_id).first()
-    if not b:
-        raise HTTPException(status_code=404, detail="Not found")
-    c = b.client
-    pet = b.pet or (c.pet_profiles[0] if c and c.pet_profiles else None)
-    missing = []
-    if not pet or not pet.profile_complete:
-        missing.append("complete their profile")
-    if not _vaccine_ok(pet):
-        missing.append("upload their Rabies certificate")
-    if b.status == "pending_payment":
-        missing.append("pay the deposit")
-
-    if missing:
-        msg = f"Hi {c.name}! We still need you to {' and '.join(missing)} before your appointment."
-    else:
-        msg = f"Hi {c.name}! Just a reminder about your upcoming grooming appointment. See you soon! 🐾"
-
-    try:
-        send_sms_raw(c.phone, msg)
-    except Exception as e:
-        print(f"[sms] Skipped — {e}")
-
-    return {"success": True, "message": msg}
 
 
 # ── Clients ───────────────────────────────────────────────────────────────────
@@ -396,10 +350,6 @@ async def upload_vaccine(
     db.commit()
 
     if result.get("needs_review"):
-        try:
-            send_vaccine_review_request(c.phone, pet.pet_name if pet else "your pet", token)
-        except Exception:
-            pass
         return {"rabies_expiry": None, "needs_review": True, "message": "Image unclear — please retake"}
 
     return {"rabies_expiry": result.get("rabies_expiry"), "needs_review": False, "message": "Certificate saved"}
