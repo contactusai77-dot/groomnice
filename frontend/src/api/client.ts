@@ -14,7 +14,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export interface BookingResponse {
   booking_id: string;
-  stripe_url: string;
   message: string;
 }
 

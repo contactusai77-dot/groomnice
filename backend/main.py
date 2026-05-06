@@ -4,9 +4,8 @@ from datetime import date, datetime, time as dt_time
 from pathlib import Path
 from typing import Optional
 
-import stripe
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,18 +14,15 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 load_dotenv()
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
 from database import Base, engine, get_db
 from models import Booking, Client, GroomerSettings, PetProfile, VaccineSubmission
 from services.sms import (
     send_booking_confirmation,
-    send_confirmation,
     send_intake_link,
     send_sms_raw,
     send_vaccine_review_request,
 )
-from services.stripe_svc import create_deposit_session
 from services.vision import extract_vaccine_info
 
 Base.metadata.create_all(bind=engine)
@@ -135,28 +131,18 @@ async def create_booking(req: BookingRequest, db: Session = Depends(get_db)):
         db.flush()
         db.add(PetProfile(id=uuid.uuid4().hex, client_id=client.id))
 
-    booking = Booking(id=uuid.uuid4().hex, client_id=client.id, status="pending_payment",
+    booking = Booking(id=uuid.uuid4().hex, client_id=client.id, status="confirmed",
                       appointment_date=datetime.combine(date.today(), dt_time(9, 0)))
     db.add(booking)
-    db.flush()
-
-    stripe_url = f"{BASE_URL}/"
-    try:
-        session = create_deposit_session(booking.id, client.name)
-        booking.stripe_session_id = session.id
-        stripe_url = session.url
-    except Exception as e:
-        print(f"[stripe] Skipped — {e}")
-
     db.commit()
 
     try:
         send_intake_link(phone, client.name, client.intake_token)
-        send_booking_confirmation(phone, client.name, stripe_url)
+        send_booking_confirmation(phone, client.name)
     except Exception as e:
         print(f"[sms] Skipped — {e}")
 
-    return {"booking_id": booking.id, "stripe_url": stripe_url, "message": "Booking created"}
+    return {"booking_id": booking.id, "message": "Booking created"}
 
 
 # ── Groomer dashboard ─────────────────────────────────────────────────────────
@@ -484,37 +470,6 @@ def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
     db.commit()
     return {"success": True}
 
-
-# ── Stripe webhook ────────────────────────────────────────────────────────────
-
-@app.post("/api/webhooks/stripe")
-async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
-    payload = await request.body()
-    sig = request.headers.get("stripe-signature", "")
-    secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-    try:
-        event = (
-            stripe.Webhook.construct_event(payload, sig, secret)
-            if secret
-            else {"type": "checkout.session.completed", "data": {"object": {}}}
-        )
-    except stripe.error.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Invalid signature")
-
-    if event["type"] == "checkout.session.completed":
-        session_obj = event["data"]["object"]
-        booking_id = (session_obj.get("metadata") or {}).get("booking_id")
-        if booking_id:
-            b = db.query(Booking).filter(Booking.id == booking_id).first()
-            if b:
-                b.status = "confirmed"
-                db.commit()
-                try:
-                    send_confirmation(b.client.phone, b.client.name)
-                except Exception as e:
-                    print(f"[sms] Confirmation skipped — {e}")
-
-    return {"received": True}
 
 
 # ── Serve React build ─────────────────────────────────────────────────────────
