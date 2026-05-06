@@ -113,6 +113,68 @@ def health():
     return {"status": "ok"}
 
 
+@app.post("/api/seed")
+def run_seed(key: str = Query(...), db: Session = Depends(get_db)):
+    if key != os.getenv("SEED_KEY", "dev"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    import importlib, sys
+    # Run seed logic inline so we don't shell out
+    from datetime import timedelta
+    db.query(__import__("models", fromlist=["VaccineSubmission"]).VaccineSubmission).delete()
+    db.query(__import__("models", fromlist=["Booking"]).Booking).delete()
+    db.query(__import__("models", fromlist=["PetProfile"]).PetProfile).delete()
+    db.query(__import__("models", fromlist=["Client"]).Client).delete()
+    db.query(__import__("models", fromlist=["GroomerSettings"]).GroomerSettings).delete()
+    db.commit()
+
+    # Re-import seed as a module would be messy — just exec the logic directly
+    today = date.today()
+    def appt(h, m): return datetime.combine(today, dt_time(h, m))
+
+    clients_data = [
+        ("Jane Smith",   "+15551110001", "Biscuit", "Golden Retriever", "2026-11-15", True),
+        ("Marco Rivera", "+15551110002", "Luna",    "Poodle",           "2025-03-01", True),
+        ("Ashley Chen",  "+15551110003", "Mochi",   "Shih Tzu",         None,         False),
+        ("Tom Bradley",  "+15551110004", "Rex",     "German Shepherd",  "2027-01-20", True),
+        ("Priya Nair",   "+15551110005", "Coco",    "Bichon Frise",     "2026-08-30", True),
+        ("Derek Walsh",  "+15551110006", "Baxter",  "Labradoodle",      None,         True),
+    ]
+    client_rows, pet_rows = [], []
+    for name, phone, pet_name, breed, vaccine_expiry, complete in clients_data:
+        c = Client(id=uuid.uuid4().hex, phone=phone, name=name, intake_token=uuid.uuid4().hex)
+        db.add(c); db.flush()
+        p = PetProfile(id=uuid.uuid4().hex, client_id=c.id, pet_name=pet_name, breed=breed,
+                       age="3 years", weight="25 lbs", emergency_contact="+15559990000",
+                       rabies_expiry=vaccine_expiry, profile_complete=complete,
+                       completed_at=datetime.utcnow() if complete else None)
+        db.add(p); db.flush()
+        client_rows.append(c); pet_rows.append(p)
+
+    jane = client_rows[0]
+    pepper = PetProfile(id=uuid.uuid4().hex, client_id=jane.id, pet_name="Pepper", breed="Corgi",
+                        age="2 years", weight="28 lbs", emergency_contact="+15559990000",
+                        rabies_expiry="2027-05-10", profile_complete=True, completed_at=datetime.utcnow())
+    db.add(pepper); db.flush()
+
+    for idx, h, m, svc, status in [(0,9,0,"Full Groom","confirmed"),(1,10,0,"Bath & Cut","confirmed"),
+                                    (2,10,30,"Nail Trim","pending_payment"),(3,11,30,"Full Groom","confirmed"),
+                                    (4,13,0,"Bath","in_progress"),(5,14,30,"Bath & Cut","pending_payment")]:
+        db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
+                       appointment_date=appt(h, m), service_type=svc, status=status, deposit_amount=25.0))
+    db.add(Booking(id=uuid.uuid4().hex, client_id=jane.id, pet_id=pepper.id,
+                   appointment_date=appt(15, 30), service_type="Bath & Cut", status="confirmed", deposit_amount=25.0))
+
+    past = datetime.utcnow() - timedelta(days=14)
+    for i in range(3):
+        db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[i].id, pet_id=pet_rows[i].id,
+                       appointment_date=past, service_type="Full Groom", status="completed", deposit_amount=25.0))
+
+    db.add(GroomerSettings(id=1, require_deposit=True, send_24h_reminder=True,
+                           send_gap_fill_text=True, deposit_amount=25.0))
+    db.commit()
+    return {"seeded": True, "date": today.isoformat()}
+
+
 # ── Customer booking flow ─────────────────────────────────────────────────────
 
 @app.post("/api/bookings")
