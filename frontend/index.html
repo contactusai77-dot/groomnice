@@ -8,6 +8,12 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      window.onerror = function(msg, src, line, col, err) {
+        document.body.innerHTML = '<pre style="padding:20px;color:red;font-family:monospace">' +
+          'JS ERROR: ' + msg + '\n' + src + ':' + line + '\n' + (err && err.stack || '') + '</pre>';
+      };
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
