@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -54,6 +54,7 @@ class Booking(Base):
     status = Column(String, default="pending_payment")
     stripe_session_id = Column(String)
     deposit_amount = Column(Float, default=25.0)
+    price = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     client = relationship("Client", back_populates="bookings")
@@ -84,3 +85,4 @@ class GroomerSettings(Base):
     send_24h_reminder = Column(Boolean, default=True)
     send_gap_fill_text = Column(Boolean, default=True)
     deposit_amount = Column(Float, default=25.0)
+    service_prices = Column(JSON, nullable=True)

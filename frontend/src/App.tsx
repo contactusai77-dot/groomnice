@@ -6,11 +6,12 @@ import DayView from "./pages/DayView";
 import PaymentCancel from "./pages/PaymentCancel";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import PetProfile from "./pages/PetProfile";
+import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
 import VaccineUpload from "./pages/VaccineUpload";
 import VaccineVault from "./pages/VaccineVault";
 
-const GROOMER_PATHS = ["/", "/clients", "/settings", "/vault"];
+const GROOMER_PATHS = ["/", "/clients", "/reports", "/settings", "/vault"];
 
 function Layout() {
   const { pathname } = useLocation();
@@ -22,6 +23,7 @@ function Layout() {
         {/* ── Groomer dashboard ── */}
         <Route path="/" element={<DayView />} />
         <Route path="/clients" element={<Clients />} />
+        <Route path="/reports" element={<ReportsPage />} />
         <Route path="/vault" element={<VaccineVault />} />
         <Route path="/settings" element={<SettingsPage />} />
 

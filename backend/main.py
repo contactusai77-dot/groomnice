@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import date, datetime, time as dt_time
+from datetime import date, datetime, time as dt_time, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +25,15 @@ app = FastAPI(title="Groomer API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:4001")
+
+DEFAULT_PRICES: dict = {
+    "Full Groom": 75.0,
+    "Bath & Cut": 60.0,
+    "Bath": 45.0,
+    "Nail Trim": 20.0,
+    "Puppy Cut": 65.0,
+    "De-shed": 70.0,
+}
 
 _UPLOADS = Path(__file__).parent / "uploads"
 _UPLOADS.mkdir(exist_ok=True)
@@ -63,6 +72,18 @@ class SettingsUpdate(BaseModel):
     send_24h_reminder: Optional[bool] = None
     send_gap_fill_text: Optional[bool] = None
     deposit_amount: Optional[float] = None
+    service_prices: Optional[dict] = None
+
+class ClientUpdate(BaseModel):
+    name: str
+    phone: str
+
+class PetUpdate(BaseModel):
+    pet_name: str = ""
+    breed: str = ""
+    age: str = ""
+    weight: str = ""
+    notes: str = ""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -92,6 +113,33 @@ def _get_settings(db: Session) -> GroomerSettings:
         db.refresh(s)
     return s
 
+def _get_prices(db: Session) -> dict:
+    s = _get_settings(db)
+    return s.service_prices or DEFAULT_PRICES
+
+def _booking_dict(b, pet=None, c=None) -> dict:
+    if c is None:
+        c = b.client
+    if pet is None:
+        pet = b.pet or (c.pet_profiles[0] if c and c.pet_profiles else None)
+    v_ok = _vaccine_ok(pet)
+    deposit_ok = b.status in ("confirmed", "completed", "in_progress")
+    return {
+        "id": b.id,
+        "appointment_date": b.appointment_date.isoformat() if b.appointment_date else None,
+        "service_type": b.service_type or "Full Groom",
+        "status": b.status,
+        "price": b.price,
+        "client_name": c.name if c else "Unknown",
+        "client_phone": c.phone if c else "",
+        "pet_name": pet.pet_name if pet else "Unknown",
+        "breed": pet.breed if pet else None,
+        "vaccine_ok": v_ok,
+        "deposit_ok": deposit_ok,
+        "ready": v_ok and deposit_ok,
+        "profile_complete": pet.profile_complete if pet else False,
+    }
+
 def _pet_dict(pet: PetProfile) -> dict:
     return {
         "id": pet.id,
@@ -114,65 +162,83 @@ def health():
 
 
 @app.post("/api/seed")
-def run_seed(key: str = Query(...), db: Session = Depends(get_db)):
+def run_seed(key: str = Query(...)):
     if key != os.getenv("SEED_KEY", "dev"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    import importlib, sys
-    # Run seed logic inline so we don't shell out
-    from datetime import timedelta
-    db.query(__import__("models", fromlist=["VaccineSubmission"]).VaccineSubmission).delete()
-    db.query(__import__("models", fromlist=["Booking"]).Booking).delete()
-    db.query(__import__("models", fromlist=["PetProfile"]).PetProfile).delete()
-    db.query(__import__("models", fromlist=["Client"]).Client).delete()
-    db.query(__import__("models", fromlist=["GroomerSettings"]).GroomerSettings).delete()
-    db.commit()
+    from database import Base, engine, SessionLocal
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    try:
+        today = date.today()
+        def appt(h, m): return datetime.combine(today, dt_time(h, m))
 
-    # Re-import seed as a module would be messy — just exec the logic directly
-    today = date.today()
-    def appt(h, m): return datetime.combine(today, dt_time(h, m))
+        clients_data = [
+            ("Jane Smith",   "+15551110001", "Biscuit", "Golden Retriever", "2026-11-15", True),
+            ("Marco Rivera", "+15551110002", "Luna",    "Poodle",           "2025-03-01", True),
+            ("Ashley Chen",  "+15551110003", "Mochi",   "Shih Tzu",         None,         False),
+            ("Tom Bradley",  "+15551110004", "Rex",     "German Shepherd",  "2027-01-20", True),
+            ("Priya Nair",   "+15551110005", "Coco",    "Bichon Frise",     "2026-08-30", True),
+            ("Derek Walsh",  "+15551110006", "Baxter",  "Labradoodle",      None,         True),
+        ]
+        client_rows, pet_rows = [], []
+        for name, phone, pet_name, breed, vaccine_expiry, complete in clients_data:
+            c = Client(id=uuid.uuid4().hex, phone=phone, name=name, intake_token=uuid.uuid4().hex)
+            db.add(c); db.flush()
+            p = PetProfile(id=uuid.uuid4().hex, client_id=c.id, pet_name=pet_name, breed=breed,
+                           age="3 years", weight="25 lbs", emergency_contact="+15559990000",
+                           rabies_expiry=vaccine_expiry, profile_complete=complete,
+                           completed_at=datetime.utcnow() if complete else None)
+            db.add(p); db.flush()
+            client_rows.append(c); pet_rows.append(p)
 
-    clients_data = [
-        ("Jane Smith",   "+15551110001", "Biscuit", "Golden Retriever", "2026-11-15", True),
-        ("Marco Rivera", "+15551110002", "Luna",    "Poodle",           "2025-03-01", True),
-        ("Ashley Chen",  "+15551110003", "Mochi",   "Shih Tzu",         None,         False),
-        ("Tom Bradley",  "+15551110004", "Rex",     "German Shepherd",  "2027-01-20", True),
-        ("Priya Nair",   "+15551110005", "Coco",    "Bichon Frise",     "2026-08-30", True),
-        ("Derek Walsh",  "+15551110006", "Baxter",  "Labradoodle",      None,         True),
-    ]
-    client_rows, pet_rows = [], []
-    for name, phone, pet_name, breed, vaccine_expiry, complete in clients_data:
-        c = Client(id=uuid.uuid4().hex, phone=phone, name=name, intake_token=uuid.uuid4().hex)
-        db.add(c); db.flush()
-        p = PetProfile(id=uuid.uuid4().hex, client_id=c.id, pet_name=pet_name, breed=breed,
-                       age="3 years", weight="25 lbs", emergency_contact="+15559990000",
-                       rabies_expiry=vaccine_expiry, profile_complete=complete,
-                       completed_at=datetime.utcnow() if complete else None)
-        db.add(p); db.flush()
-        client_rows.append(c); pet_rows.append(p)
+        jane = client_rows[0]
+        pepper = PetProfile(id=uuid.uuid4().hex, client_id=jane.id, pet_name="Pepper", breed="Corgi",
+                            age="2 years", weight="28 lbs", emergency_contact="+15559990000",
+                            rabies_expiry="2027-05-10", profile_complete=True, completed_at=datetime.utcnow())
+        db.add(pepper); db.flush()
 
-    jane = client_rows[0]
-    pepper = PetProfile(id=uuid.uuid4().hex, client_id=jane.id, pet_name="Pepper", breed="Corgi",
-                        age="2 years", weight="28 lbs", emergency_contact="+15559990000",
-                        rabies_expiry="2027-05-10", profile_complete=True, completed_at=datetime.utcnow())
-    db.add(pepper); db.flush()
+        today_bookings = [
+            (0, 9,  0,  "Full Groom",  "confirmed",       75.0),
+            (1, 10, 0,  "Bath & Cut",  "confirmed",       60.0),
+            (2, 10, 30, "Nail Trim",   "pending_payment", 20.0),
+            (3, 11, 30, "Full Groom",  "confirmed",       75.0),
+            (4, 13, 0,  "Bath",        "in_progress",     45.0),
+            (5, 14, 30, "Bath & Cut",  "pending_payment", 60.0),
+        ]
+        for idx, h, m, svc, status, price in today_bookings:
+            db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
+                           appointment_date=appt(h, m), service_type=svc, status=status,
+                           deposit_amount=25.0, price=price))
+        db.add(Booking(id=uuid.uuid4().hex, client_id=jane.id, pet_id=pepper.id,
+                       appointment_date=appt(15, 30), service_type="Bath & Cut", status="confirmed",
+                       deposit_amount=25.0, price=60.0))
 
-    for idx, h, m, svc, status in [(0,9,0,"Full Groom","confirmed"),(1,10,0,"Bath & Cut","confirmed"),
-                                    (2,10,30,"Nail Trim","pending_payment"),(3,11,30,"Full Groom","confirmed"),
-                                    (4,13,0,"Bath","in_progress"),(5,14,30,"Bath & Cut","pending_payment")]:
-        db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
-                       appointment_date=appt(h, m), service_type=svc, status=status, deposit_amount=25.0))
-    db.add(Booking(id=uuid.uuid4().hex, client_id=jane.id, pet_id=pepper.id,
-                   appointment_date=appt(15, 30), service_type="Bath & Cut", status="confirmed", deposit_amount=25.0))
+        # Past bookings across several weeks for history/revenue demo
+        for days_ago, idx, h, svc, status, price in [
+            (3,  0, 10, "Full Groom",  "completed", 75.0),
+            (3,  1, 11, "Bath & Cut",  "completed", 60.0),
+            (3,  2, 14, "Nail Trim",   "completed", 20.0),
+            (7,  3, 9,  "Full Groom",  "completed", 75.0),
+            (7,  4, 13, "Bath",        "completed", 45.0),
+            (14, 0, 10, "Bath & Cut",  "completed", 60.0),
+            (14, 5, 11, "Full Groom",  "completed", 75.0),
+            (21, 1, 9,  "Nail Trim",   "completed", 20.0),
+            (21, 3, 14, "Full Groom",  "completed", 75.0),
+            (28, 2, 10, "Bath & Cut",  "completed", 60.0),
+        ]:
+            past = datetime.combine(today - timedelta(days=days_ago), dt_time(h, 0))
+            db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
+                           appointment_date=past, service_type=svc, status=status,
+                           deposit_amount=25.0, price=price))
 
-    past = datetime.utcnow() - timedelta(days=14)
-    for i in range(3):
-        db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[i].id, pet_id=pet_rows[i].id,
-                       appointment_date=past, service_type="Full Groom", status="completed", deposit_amount=25.0))
-
-    db.add(GroomerSettings(id=1, require_deposit=True, send_24h_reminder=True,
-                           send_gap_fill_text=True, deposit_amount=25.0))
-    db.commit()
-    return {"seeded": True, "date": today.isoformat()}
+        db.add(GroomerSettings(id=1, require_deposit=True, send_24h_reminder=True,
+                               send_gap_fill_text=True, deposit_amount=25.0,
+                               service_prices=DEFAULT_PRICES))
+        db.commit()
+        return {"seeded": True, "date": today.isoformat()}
+    finally:
+        db.close()
 
 
 # ── Customer booking flow ─────────────────────────────────────────────────────
@@ -204,27 +270,72 @@ def get_today_appointments(db: Session = Depends(get_db)):
         .filter(func.date(Booking.appointment_date) == today)
         .all()
     )
+    result = [_booking_dict(b) for b in bookings]
+    return sorted(result, key=lambda x: x["appointment_date"] or "")
+
+
+@app.get("/api/appointments/history")
+def get_history(q: str = Query(""), days: int = Query(60), db: Session = Depends(get_db)):
+    since = datetime.combine(date.today() - timedelta(days=days), dt_time(0, 0))
+    today_start = datetime.combine(date.today(), dt_time(0, 0))
+    bookings = (
+        db.query(Booking)
+        .filter(Booking.appointment_date >= since)
+        .filter(Booking.appointment_date < today_start)
+        .order_by(Booking.appointment_date.desc())
+        .all()
+    )
     result = []
     for b in bookings:
-        c = b.client
-        pet = b.pet or (c.pet_profiles[0] if c and c.pet_profiles else None)
-        v_ok = _vaccine_ok(pet)
-        deposit_ok = b.status in ("confirmed", "completed", "in_progress")
-        result.append({
-            "id": b.id,
-            "appointment_date": b.appointment_date.isoformat() if b.appointment_date else None,
-            "service_type": b.service_type or "Full Groom",
-            "status": b.status,
-            "client_name": c.name if c else "Unknown",
-            "client_phone": c.phone if c else "",
-            "pet_name": pet.pet_name if pet else "Unknown",
-            "breed": pet.breed if pet else None,
-            "vaccine_ok": v_ok,
-            "deposit_ok": deposit_ok,
-            "ready": v_ok and deposit_ok,
-            "profile_complete": pet.profile_complete if pet else False,
-        })
-    return sorted(result, key=lambda x: x["appointment_date"] or "")
+        d = _booking_dict(b)
+        if q:
+            ql = q.lower()
+            if ql not in d["client_name"].lower() and ql not in (d["pet_name"] or "").lower():
+                continue
+        result.append(d)
+    return result
+
+
+@app.get("/api/revenue")
+def get_revenue(db: Session = Depends(get_db)):
+    prices = _get_prices(db)
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+
+    def revenue_for(start: date):
+        bookings = (
+            db.query(Booking)
+            .filter(Booking.status == "completed")
+            .filter(func.date(Booking.appointment_date) >= start)
+            .filter(func.date(Booking.appointment_date) <= today)
+            .all()
+        )
+        total = sum(b.price if b.price is not None else prices.get(b.service_type or "", 0) for b in bookings)
+        return {"revenue": round(total, 2), "count": len(bookings)}
+
+    # Revenue by service type (month)
+    month_bookings = (
+        db.query(Booking)
+        .filter(Booking.status == "completed")
+        .filter(func.date(Booking.appointment_date) >= month_start)
+        .all()
+    )
+    by_service: dict = {}
+    for b in month_bookings:
+        svc = b.service_type or "Other"
+        p = b.price if b.price is not None else prices.get(svc, 0)
+        if svc not in by_service:
+            by_service[svc] = {"revenue": 0.0, "count": 0}
+        by_service[svc]["revenue"] = round(by_service[svc]["revenue"] + p, 2)
+        by_service[svc]["count"] += 1
+
+    return {
+        "today": revenue_for(today),
+        "week": revenue_for(week_start),
+        "month": revenue_for(month_start),
+        "by_service": by_service,
+    }
 
 
 @app.post("/api/bookings/quick")
@@ -253,12 +364,15 @@ async def quick_booking(req: QuickBookingRequest, db: Session = Depends(get_db))
         except ValueError:
             pass
 
+    settings = _get_settings(db)
+    prices = settings.service_prices or DEFAULT_PRICES
     booking = Booking(
         id=uuid.uuid4().hex,
         client_id=client.id,
         service_type=req.service_type,
         appointment_date=appt_dt,
-        status="pending_payment",
+        status="confirmed",
+        price=prices.get(req.service_type),
     )
     db.add(booking)
     db.flush()
@@ -300,6 +414,30 @@ def get_clients(db: Session = Depends(get_db)):
             "last_visit": last.created_at.isoformat() if last else None,
         })
     return result
+
+
+# ── Client / pet edit (groomer-facing) ───────────────────────────────────────
+
+@app.patch("/api/clients/{client_id}")
+def update_client(client_id: str, body: ClientUpdate, db: Session = Depends(get_db)):
+    c = db.query(Client).filter(Client.id == client_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Not found")
+    c.name = body.name
+    c.phone = normalize_phone(body.phone)
+    db.commit()
+    return {"success": True}
+
+
+@app.patch("/api/pets/{pet_id}")
+def update_pet_groomer(pet_id: str, data: PetUpdate, db: Session = Depends(get_db)):
+    pet = db.query(PetProfile).filter(PetProfile.id == pet_id).first()
+    if not pet:
+        raise HTTPException(status_code=404, detail="Not found")
+    for field in ("pet_name", "breed", "age", "weight", "notes"):
+        setattr(pet, field, getattr(data, field))
+    db.commit()
+    return {"success": True}
 
 
 # ── Pet profile (customer-facing) ─────────────────────────────────────────────
@@ -471,6 +609,7 @@ def get_settings(db: Session = Depends(get_db)):
         "send_24h_reminder": s.send_24h_reminder,
         "send_gap_fill_text": s.send_gap_fill_text,
         "deposit_amount": s.deposit_amount,
+        "service_prices": s.service_prices or DEFAULT_PRICES,
     }
 
 

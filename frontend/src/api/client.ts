@@ -56,6 +56,7 @@ export interface AppointmentData {
   appointment_date: string | null;
   service_type: string;
   status: string;
+  price: number | null;
   client_name: string;
   client_phone: string;
   pet_name: string;
@@ -81,6 +82,15 @@ export interface SettingsData {
   send_24h_reminder: boolean;
   send_gap_fill_text: boolean;
   deposit_amount: number;
+  service_prices: Record<string, number>;
+}
+
+export interface RevenuePeriod { revenue: number; count: number; }
+export interface RevenueData {
+  today: RevenuePeriod;
+  week: RevenuePeriod;
+  month: RevenuePeriod;
+  by_service: Record<string, RevenuePeriod>;
 }
 
 export interface VaultSubmission {
@@ -152,9 +162,22 @@ export const api = {
       body: JSON.stringify({ expiry }),
     }),
 
+  // History + Revenue
+  getHistory: (q?: string, days?: number) =>
+    request<AppointmentData[]>(`/appointments/history?q=${encodeURIComponent(q ?? "")}&days=${days ?? 60}`),
+
+  getRevenue: () => request<RevenueData>("/revenue"),
+
   // Settings
   getSettings: () => request<SettingsData>("/settings"),
 
   updateSettings: (data: Partial<SettingsData>) =>
     request<{ success: boolean }>("/settings", { method: "PATCH", body: JSON.stringify(data) }),
+
+  // Edit client / pet (groomer)
+  updateClient: (id: string, data: { name: string; phone: string }) =>
+    request<{ success: boolean }>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+
+  updatePetGroomer: (petId: string, data: { pet_name: string; breed: string; age: string; weight: string; notes: string }) =>
+    request<{ success: boolean }>(`/pets/${petId}`, { method: "PATCH", body: JSON.stringify(data) }),
 };

@@ -24,16 +24,24 @@ export default function DayView() {
   useEffect(() => { load(); }, [load]);
 
   const ready = appointments.filter(a => a.ready).length;
+  const earned = appointments
+    .filter(a => a.status === "completed")
+    .reduce((sum, a) => sum + (a.price ?? 0), 0);
 
   return (
     <div className="min-h-screen bg-gray-50 pb-28">
       {/* Header */}
       <div className="bg-white px-5 pt-14 pb-4 border-b border-gray-100">
-        <div className="flex items-center gap-2 mb-1">
-          <Scissors size={16} className="text-violet-500" />
-          <span className="text-xs font-semibold text-violet-500 uppercase tracking-wide">
-            Groomer Dashboard
-          </span>
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <Scissors size={16} className="text-violet-500" />
+            <span className="text-xs font-semibold text-violet-500 uppercase tracking-wide">
+              Groomer Dashboard
+            </span>
+          </div>
+          {earned > 0 && (
+            <span className="text-sm font-semibold text-green-600">${earned} today</span>
+          )}
         </div>
         <h1 className="text-2xl font-bold text-gray-900">{today}</h1>
         {appointments.length > 0 && (

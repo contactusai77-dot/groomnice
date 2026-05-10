@@ -4,6 +4,15 @@ import uuid
 from database import SessionLocal, engine, Base
 from models import Booking, Client, GroomerSettings, PetProfile, VaccineSubmission
 
+SERVICE_PRICES = {
+    "Full Groom": 75.0,
+    "Bath & Cut": 60.0,
+    "Bath": 45.0,
+    "Nail Trim": 20.0,
+    "Puppy Cut": 65.0,
+    "De-shed": 70.0,
+}
+
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
@@ -71,12 +80,12 @@ db.flush()
 # ── Today's bookings ──────────────────────────────────────────────────────────
 bookings_data = [
     # (client_index, hour, minute, service, status)
-    (0, 9,  0,  "Full Groom",  "confirmed"),      # Jane / Biscuit   — ready ✅
-    (1, 10, 0,  "Bath & Cut",  "confirmed"),      # Marco / Luna     — vaccine expired 🔴
-    (2, 10, 30, "Nail Trim",   "pending_payment"),# Ashley / Mochi   — no vaccine + no deposit 🔴
-    (3, 11, 30, "Full Groom",  "confirmed"),      # Tom / Rex        — ready ✅
-    (4, 13, 0,  "Bath",        "in_progress"),    # Priya / Coco     — grooming now 🔵
-    (5, 14, 30, "Bath & Cut",  "pending_payment"),# Derek / Baxter   — no vaccine 🔴
+    (0, 9,  0,  "Full Groom",  "confirmed"),
+    (1, 10, 0,  "Bath & Cut",  "confirmed"),
+    (2, 10, 30, "Nail Trim",   "pending_payment"),
+    (3, 11, 30, "Full Groom",  "confirmed"),
+    (4, 13, 0,  "Bath",        "in_progress"),
+    (5, 14, 30, "Bath & Cut",  "pending_payment"),
 ]
 
 for idx, h, m, service, status in bookings_data:
@@ -88,41 +97,43 @@ for idx, h, m, service, status in bookings_data:
         service_type=service,
         status=status,
         deposit_amount=25.0,
+        price=SERVICE_PRICES.get(service),
     )
     db.add(b)
 
-# Jane's second pet also has a slot today
+# Jane's second pet
 db.add(Booking(
-    id=_uuid(),
-    client_id=jane.id,
-    pet_id=jane_pet2.id,
-    appointment_date=appt(15, 30),
-    service_type="Bath & Cut",
-    status="confirmed",
-    deposit_amount=25.0,
+    id=_uuid(), client_id=jane.id, pet_id=jane_pet2.id,
+    appointment_date=appt(15, 30), service_type="Bath & Cut", status="confirmed",
+    deposit_amount=25.0, price=60.0,
 ))
 
-# ── Past bookings (shows up in Clients "last visit") ──────────────────────────
-past = datetime.utcnow() - timedelta(days=14)
-for i, c in enumerate(client_rows[:3]):
-    b = Booking(
-        id=_uuid(),
-        client_id=c.id,
-        pet_id=pet_rows[i].id,
-        appointment_date=past,
-        service_type="Full Groom",
-        status="completed",
-        deposit_amount=25.0,
-    )
-    db.add(b)
+# ── Past bookings for history + revenue demo ──────────────────────────────────
+past_bookings = [
+    (3,  0, 10, "Full Groom",  "completed", 75.0),
+    (3,  1, 11, "Bath & Cut",  "completed", 60.0),
+    (3,  2, 14, "Nail Trim",   "completed", 20.0),
+    (7,  3, 9,  "Full Groom",  "completed", 75.0),
+    (7,  4, 13, "Bath",        "completed", 45.0),
+    (14, 0, 10, "Bath & Cut",  "completed", 60.0),
+    (14, 5, 11, "Full Groom",  "completed", 75.0),
+    (21, 1, 9,  "Nail Trim",   "completed", 20.0),
+    (21, 3, 14, "Full Groom",  "completed", 75.0),
+    (28, 2, 10, "Bath & Cut",  "completed", 60.0),
+]
+for days_ago, idx, h, svc, status, price in past_bookings:
+    past_dt = datetime.combine(today - timedelta(days=days_ago), dt_time(h, 0))
+    db.add(Booking(
+        id=_uuid(), client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
+        appointment_date=past_dt, service_type=svc, status=status,
+        deposit_amount=25.0, price=price,
+    ))
 
 # ── Groomer settings ──────────────────────────────────────────────────────────
 db.add(GroomerSettings(
-    id=1,
-    require_deposit=True,
-    send_24h_reminder=True,
-    send_gap_fill_text=True,
-    deposit_amount=25.0,
+    id=1, require_deposit=True, send_24h_reminder=True,
+    send_gap_fill_text=True, deposit_amount=25.0,
+    service_prices=SERVICE_PRICES,
 ))
 
 db.commit()
