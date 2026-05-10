@@ -138,6 +138,7 @@ def _booking_dict(b, pet=None, c=None) -> dict:
         "deposit_ok": deposit_ok,
         "ready": v_ok and deposit_ok,
         "profile_complete": pet.profile_complete if pet else False,
+        "intake_token": c.intake_token if c else None,
     }
 
 def _pet_dict(pet: PetProfile) -> dict:
