@@ -6,6 +6,11 @@ export default defineConfig({
   retries: 1,
   reporter: [["list"], ["html", { open: "never" }]],
 
+  // workers: 1 runs spec files sequentially so state mutations in one file
+  // don't race with reads in another file. Each spec that mutates state
+  // re-seeds via afterAll, so the next spec starts clean.
+  workers: 1,
+
   use: {
     baseURL: "http://localhost:4000",
     trace: "on-first-retry",
@@ -21,7 +26,15 @@ export default defineConfig({
     },
     {
       name: "mobile",
-      use: { ...devices["iPhone 14"] },
+      // WebKit not available on Windows; emulate iPhone 14 viewport in Chromium
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 390, height: 844 },
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+        userAgent: devices["iPhone 14"].userAgent,
+      },
     },
   ],
 });
