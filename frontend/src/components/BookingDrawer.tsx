@@ -17,7 +17,8 @@ export default function BookingDrawer({ open, onClose, onSuccess }: Props) {
   });
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
   const [profileUrl, setProfileUrl] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [vaccineUrl, setVaccineUrl] = useState("");
+  const [copied, setCopied] = useState<"profile" | "vaccine" | null>(null);
   const [error, setError] = useState("");
 
   function set(key: keyof typeof form) {
@@ -31,7 +32,9 @@ export default function BookingDrawer({ open, onClose, onSuccess }: Props) {
     setError("");
     try {
       const res = await api.quickBooking(form);
-      setProfileUrl(`${window.location.origin}/profile/${res.intake_token}`);
+      const origin = window.location.origin;
+      setProfileUrl(`${origin}/profile/${res.intake_token}`);
+      setVaccineUrl(`${origin}/vaccine/${res.intake_token}`);
       setStatus("done");
       onSuccess();
     } catch (err) {
@@ -40,17 +43,18 @@ export default function BookingDrawer({ open, onClose, onSuccess }: Props) {
     }
   }
 
-  function copyLink() {
-    navigator.clipboard.writeText(profileUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  function copyLink(which: "profile" | "vaccine") {
+    navigator.clipboard.writeText(which === "profile" ? profileUrl : vaccineUrl);
+    setCopied(which);
+    setTimeout(() => setCopied(null), 2000);
   }
 
   function reset() {
     setStatus("idle");
     setForm({ phone: "", client_name: "", pet_name: "", service_type: "Full Groom", appointment_time: "" });
     setProfileUrl("");
-    setCopied(false);
+    setVaccineUrl("");
+    setCopied(null);
     onClose();
   }
 
@@ -68,19 +72,37 @@ export default function BookingDrawer({ open, onClose, onSuccess }: Props) {
         </div>
 
         {status === "done" ? (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <p className="text-sm text-gray-500">
-              Copy this link and text it to <strong>{form.client_name || form.phone}</strong> so they can fill out their pet's profile:
+              Text these links to <strong>{form.client_name || form.phone}</strong>:
             </p>
-            <div className="bg-gray-50 border border-gray-200 rounded-2xl px-4 py-3 text-xs text-gray-600 break-all">
-              {profileUrl}
+
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Pet profile (intake form)</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-600 break-all mb-1.5">
+                {profileUrl}
+              </div>
+              <button
+                onClick={() => copyLink("profile")}
+                className="w-full bg-violet-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 active:bg-violet-700 transition text-sm"
+              >
+                {copied === "profile" ? <><Check size={15} /> Copied!</> : <><ClipboardCopy size={15} /> Copy Profile Link</>}
+              </button>
             </div>
-            <button
-              onClick={copyLink}
-              className="w-full bg-violet-600 text-white py-4 rounded-2xl font-semibold flex items-center justify-center gap-2 active:bg-violet-700 transition"
-            >
-              {copied ? <><Check size={17} /> Copied!</> : <><ClipboardCopy size={17} /> Copy Link</>}
-            </button>
+
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-1">Vaccine upload</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs text-gray-600 break-all mb-1.5">
+                {vaccineUrl}
+              </div>
+              <button
+                onClick={() => copyLink("vaccine")}
+                className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 active:bg-emerald-700 transition text-sm"
+              >
+                {copied === "vaccine" ? <><Check size={15} /> Copied!</> : <><ClipboardCopy size={15} /> Copy Vaccine Link</>}
+              </button>
+            </div>
+
             <button onClick={reset} className="w-full text-gray-400 text-sm py-1">
               Done
             </button>

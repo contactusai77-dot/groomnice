@@ -17,6 +17,7 @@ load_dotenv()
 
 from database import Base, engine, get_db
 from models import Booking, Client, GroomerSettings, PetProfile, VaccineSubmission
+from services.sms import send_booking_confirmation, send_booking_request_received, send_intake_link, send_vaccine_link
 from services.vision import extract_vaccine_info
 
 Base.metadata.create_all(bind=engine)
@@ -25,6 +26,13 @@ app = FastAPI(title="Groomer API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:4001")
+
+DEFAULT_WORKING_HOURS: dict = {
+    "days": [0, 1, 2, 3, 4],  # Mon–Fri (Python weekday)
+    "start": "09:00",
+    "end": "17:00",
+    "slot_minutes": 60,
+}
 
 DEFAULT_PRICES: dict = {
     "Full Groom": 75.0,
@@ -73,6 +81,15 @@ class SettingsUpdate(BaseModel):
     send_gap_fill_text: Optional[bool] = None
     deposit_amount: Optional[float] = None
     service_prices: Optional[dict] = None
+    working_hours: Optional[dict] = None
+
+class OnlineBookingRequest(BaseModel):
+    phone: str
+    name: str
+    pet_name: str = ""
+    service_type: str = "Full Groom"
+    slot_date: str   # "YYYY-MM-DD"
+    slot_time: str   # "HH:MM"
 
 class ClientUpdate(BaseModel):
     name: str
@@ -139,6 +156,7 @@ def _booking_dict(b, pet=None, c=None) -> dict:
         "ready": v_ok and deposit_ok,
         "profile_complete": pet.profile_complete if pet else False,
         "intake_token": c.intake_token if c else None,
+        "source": b.source or "groomer",
     }
 
 def _pet_dict(pet: PetProfile) -> dict:
@@ -235,7 +253,8 @@ def run_seed(key: str = Query(...)):
 
         db.add(GroomerSettings(id=1, require_deposit=True, send_24h_reminder=True,
                                send_gap_fill_text=True, deposit_amount=25.0,
-                               service_prices=DEFAULT_PRICES))
+                               service_prices=DEFAULT_PRICES,
+                               working_hours=DEFAULT_WORKING_HOURS))
         db.commit()
         return {"seeded": True, "date": today.isoformat()}
     finally:
@@ -378,7 +397,108 @@ async def quick_booking(req: QuickBookingRequest, db: Session = Depends(get_db))
     db.add(booking)
     db.flush()
     db.commit()
+
+    # SMS: send intake + vaccine links (no-op when Twilio not configured)
+    send_intake_link(client.phone, client.name, client.intake_token)
+    send_vaccine_link(client.phone, client.name, client.intake_token)
+
     return {"booking_id": booking.id, "intake_token": client.intake_token}
+
+
+# ── Online booking (customer-facing) ─────────────────────────────────────────
+
+@app.get("/api/book/slots")
+def get_booking_slots(db: Session = Depends(get_db)):
+    """Return available time slots for the next 7 days based on working hours."""
+    s = _get_settings(db)
+    wh = s.working_hours or DEFAULT_WORKING_HOURS
+    work_days: list = wh.get("days", [0, 1, 2, 3, 4])
+    sh, sm = map(int, wh.get("start", "09:00").split(":"))
+    eh, em = map(int, wh.get("end", "17:00").split(":"))
+    slot_min: int = wh.get("slot_minutes", 60)
+
+    today = date.today()
+    now = datetime.utcnow()
+    result = []
+
+    for delta in range(7):
+        d = today + timedelta(days=delta)
+        if d.weekday() not in work_days:
+            continue
+
+        # Existing bookings for this day (any non-declined/canceled status)
+        booked = db.query(Booking).filter(
+            func.date(Booking.appointment_date) == d,
+            Booking.status.notin_(["declined", "canceled"]),
+        ).all()
+        booked_times = {b.appointment_date.strftime("%H:%M") for b in booked if b.appointment_date}
+
+        slots = []
+        current = datetime.combine(d, dt_time(sh, sm))
+        day_end = datetime.combine(d, dt_time(eh, em))
+        while current + timedelta(minutes=slot_min) <= day_end:
+            # For today, only show slots at least 1 hour from now
+            if d == today and current <= now + timedelta(hours=1):
+                current += timedelta(minutes=slot_min)
+                continue
+            label = current.strftime("%H:%M")
+            if label not in booked_times:
+                slots.append(label)
+            current += timedelta(minutes=slot_min)
+
+        if slots:
+            result.append({
+                "date": d.isoformat(),
+                "day_name": d.strftime("%A"),
+                "slots": slots,
+            })
+
+    return result
+
+
+@app.post("/api/book")
+async def online_booking(req: OnlineBookingRequest, db: Session = Depends(get_db)):
+    """Client-facing booking request — creates a pending_review booking."""
+    phone = normalize_phone(req.phone)
+    client = db.query(Client).filter(Client.phone == phone).first()
+    if not client:
+        client = Client(id=uuid.uuid4().hex, phone=phone, name=req.name, intake_token=uuid.uuid4().hex)
+        db.add(client)
+        db.flush()
+        pet = PetProfile(id=uuid.uuid4().hex, client_id=client.id, pet_name=req.pet_name or None)
+        db.add(pet)
+        db.flush()
+    else:
+        client.name = req.name
+        if req.pet_name and client.pet_profiles:
+            client.pet_profiles[0].pet_name = req.pet_name
+
+    try:
+        d = date.fromisoformat(req.slot_date)
+        h, m = map(int, req.slot_time.split(":"))
+        appt_dt = datetime.combine(d, dt_time(h, m))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid slot_date or slot_time")
+
+    settings = _get_settings(db)
+    prices = settings.service_prices or DEFAULT_PRICES
+    booking = Booking(
+        id=uuid.uuid4().hex,
+        client_id=client.id,
+        service_type=req.service_type,
+        appointment_date=appt_dt,
+        status="pending_review",
+        source="online",
+        price=prices.get(req.service_type),
+    )
+    db.add(booking)
+    db.commit()
+
+    # SMS stubs (fire-and-forget when Twilio is configured)
+    send_booking_request_received(client.phone, client.name)
+    send_vaccine_link(client.phone, client.name, client.intake_token)
+
+    return {"booking_id": booking.id, "intake_token": client.intake_token, "status": "pending_review"}
 
 
 @app.patch("/api/bookings/{booking_id}/status")
@@ -611,6 +731,7 @@ def get_settings(db: Session = Depends(get_db)):
         "send_gap_fill_text": s.send_gap_fill_text,
         "deposit_amount": s.deposit_amount,
         "service_prices": s.service_prices or DEFAULT_PRICES,
+        "working_hours": s.working_hours or DEFAULT_WORKING_HOURS,
     }
 
 

@@ -65,6 +65,20 @@ export interface AppointmentData {
   deposit_ok: boolean;
   ready: boolean;
   profile_complete: boolean;
+  intake_token: string | null;
+  source: string;
+}
+
+export interface BookingSlot {
+  date: string;
+  day_name: string;
+  slots: string[];
+}
+
+export interface OnlineBookingResult {
+  booking_id: string;
+  intake_token: string;
+  status: string;
 }
 
 export interface ClientData {
@@ -77,12 +91,20 @@ export interface ClientData {
   last_visit: string | null;
 }
 
+export interface WorkingHours {
+  days: number[];       // 0=Mon … 6=Sun
+  start: string;        // "HH:MM"
+  end: string;          // "HH:MM"
+  slot_minutes: number;
+}
+
 export interface SettingsData {
   require_deposit: boolean;
   send_24h_reminder: boolean;
   send_gap_fill_text: boolean;
   deposit_amount: number;
   service_prices: Record<string, number>;
+  working_hours: WorkingHours;
 }
 
 export interface RevenuePeriod { revenue: number; count: number; }
@@ -167,6 +189,18 @@ export const api = {
     request<AppointmentData[]>(`/appointments/history?q=${encodeURIComponent(q ?? "")}&days=${days ?? 60}`),
 
   getRevenue: () => request<RevenueData>("/revenue"),
+
+  // Online booking (customer-facing)
+  getBookingSlots: () => request<BookingSlot[]>("/book/slots"),
+
+  onlineBook: (data: {
+    phone: string;
+    name: string;
+    pet_name: string;
+    service_type: string;
+    slot_date: string;
+    slot_time: string;
+  }) => request<OnlineBookingResult>("/book", { method: "POST", body: JSON.stringify(data) }),
 
   // Settings
   getSettings: () => request<SettingsData>("/settings"),

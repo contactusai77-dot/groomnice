@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { SettingsData, api } from "../api/client";
+import { SettingsData, WorkingHours, api } from "../api/client";
 
 const SERVICES = ["Full Groom", "Bath & Cut", "Bath", "Nail Trim", "Puppy Cut", "De-shed"];
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
@@ -30,6 +31,30 @@ export default function SettingsPage() {
 
   function savePrice() {
     if (settings) save(settings);
+  }
+
+  function toggleWorkDay(dayIdx: number) {
+    if (!settings) return;
+    const wh: WorkingHours = settings.working_hours;
+    const days = wh.days.includes(dayIdx)
+      ? wh.days.filter(d => d !== dayIdx)
+      : [...wh.days, dayIdx].sort();
+    save({ ...settings, working_hours: { ...wh, days } });
+  }
+
+  function updateWorkHours(field: "start" | "end", value: string) {
+    if (!settings) return;
+    setSettings(s => s ? { ...s, working_hours: { ...s.working_hours, [field]: value } } : s);
+  }
+
+  function saveWorkHours() {
+    if (settings) save(settings);
+  }
+
+  function toggleSlotDuration() {
+    if (!settings) return;
+    const current = settings.working_hours.slot_minutes;
+    save({ ...settings, working_hours: { ...settings.working_hours, slot_minutes: current === 60 ? 30 : 60 } });
   }
 
   if (!settings) {
@@ -68,6 +93,58 @@ export default function SettingsPage() {
               </div>
             </div>
           ))}
+        </div>
+
+        <Section title="Online Booking — Working Hours" />
+
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-4">
+          {/* Working days */}
+          <div>
+            <p className="text-xs font-medium text-gray-500 mb-2">Working days</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {DAYS.map((label, i) => {
+                const active = settings.working_hours.days.includes(i);
+                return (
+                  <button key={i} onClick={() => toggleWorkDay(i)}
+                    className={`w-10 h-10 rounded-xl text-sm font-semibold border transition ${
+                      active ? "bg-violet-600 text-white border-violet-600" : "bg-gray-50 text-gray-500 border-gray-200"
+                    }`}>
+                    {label[0]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Start / End time */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Opens</label>
+              <input type="time" value={settings.working_hours.start}
+                onChange={e => updateWorkHours("start", e.target.value)}
+                onBlur={saveWorkHours}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-400" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Closes</label>
+              <input type="time" value={settings.working_hours.end}
+                onChange={e => updateWorkHours("end", e.target.value)}
+                onBlur={saveWorkHours}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-400" />
+            </div>
+          </div>
+
+          {/* Slot duration */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-800">Slot duration</p>
+              <p className="text-xs text-gray-400 mt-0.5">Time per appointment slot</p>
+            </div>
+            <button onClick={toggleSlotDuration}
+              className="px-4 py-2 border border-gray-200 rounded-xl text-sm font-semibold text-gray-700 bg-gray-50 active:bg-gray-100">
+              {settings.working_hours.slot_minutes} min
+            </button>
+          </div>
         </div>
 
         <Section title="Deposit" />

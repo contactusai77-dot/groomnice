@@ -58,9 +58,17 @@ export default function DayView() {
         ) : appointments.length === 0 ? (
           <Empty />
         ) : (
-          appointments.map(a => (
-            <AppointmentCard key={a.id} appointment={a} onUpdate={load} />
-          ))
+          <>
+            {/* Pending online booking requests */}
+            {appointments.filter(a => a.status === "pending_review").map(a => (
+              <AppointmentCard key={a.id} appointment={a} onUpdate={load} />
+            ))}
+
+            {/* Confirmed / in-progress / completed */}
+            {appointments.filter(a => a.status !== "pending_review").map(a => (
+              <AppointmentCard key={a.id} appointment={a} onUpdate={load} />
+            ))}
+          </>
         )}
       </div>
 

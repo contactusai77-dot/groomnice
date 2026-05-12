@@ -55,6 +55,7 @@ class Booking(Base):
     stripe_session_id = Column(String)
     deposit_amount = Column(Float, default=25.0)
     price = Column(Float, nullable=True)
+    source = Column(String, default="groomer")  # "groomer" | "online"
     created_at = Column(DateTime, default=datetime.utcnow)
 
     client = relationship("Client", back_populates="bookings")
@@ -86,3 +87,4 @@ class GroomerSettings(Base):
     send_gap_fill_text = Column(Boolean, default=True)
     deposit_amount = Column(Float, default=25.0)
     service_prices = Column(JSON, nullable=True)
+    working_hours = Column(JSON, nullable=True)  # {days, start, end, slot_minutes}
