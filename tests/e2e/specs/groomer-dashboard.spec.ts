@@ -82,7 +82,8 @@ test.describe("Today tab — groomer dashboard", () => {
     await page.getByText("Create Booking →").click();
 
     await expect(page.getByText("Booking Created!")).toBeVisible();
-    await expect(page.getByText("Copy Link")).toBeVisible();
+    await expect(page.getByText("Copy Profile Link")).toBeVisible();
+    await expect(page.getByText("Copy Vaccine Link")).toBeVisible();
 
     // After dismissing, new card must appear
     await page.keyboard.press("Escape");

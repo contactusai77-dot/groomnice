@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: "./specs",
   timeout: 15_000,
   retries: 1,
-  reporter: [["list"], ["html", { open: "never" }]],
+  reporter: [["list"], ["html", { open: "never" }], ["json", { outputFile: "test-results.json" }]],
 
   // workers: 1 runs spec files sequentially so state mutations in one file
   // don't race with reads in another file. Each spec that mutates state
@@ -12,7 +12,7 @@ export default defineConfig({
   workers: 1,
 
   use: {
-    baseURL: "http://localhost:4000",
+    baseURL: "http://localhost:4001",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },

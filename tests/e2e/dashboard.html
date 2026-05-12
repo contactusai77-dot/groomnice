@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Groomnice Test Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f8fafc; color: #1e293b; }
+  header { background: #7c3aed; color: white; padding: 24px 32px; }
+  header h1 { font-size: 22px; font-weight: 700; }
+  header p { font-size: 13px; opacity: 0.8; margin-top: 4px; }
+  .summary { display: flex; gap: 16px; padding: 20px 32px; background: white; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+  .stat { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 10px; font-size: 14px; font-weight: 600; }
+  .stat.pass { background: #f0fdf4; color: #166534; }
+  .stat.fail { background: #fef2f2; color: #991b1b; }
+  .stat.skip { background: #fefce8; color: #854d0e; }
+  .stat.xfail { background: #eff6ff; color: #1e40af; }
+  .content { padding: 24px 32px; max-width: 1100px; }
+  .group { margin-bottom: 32px; }
+  .group-title { font-size: 16px; font-weight: 700; color: #7c3aed; margin-bottom: 12px; padding-bottom: 6px; border-bottom: 2px solid #e9d5ff; }
+  .suite { margin-bottom: 16px; background: white; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; }
+  .suite-title { padding: 10px 16px; background: #f8fafc; font-size: 13px; font-weight: 600; color: #475569; border-bottom: 1px solid #e2e8f0; }
+  .test-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px; border-bottom: 1px solid #f1f5f9; }
+  .test-row:last-child { border-bottom: none; }
+  .test-row.failed { background: #fff5f5; }
+  .test-row.xfail { background: #eff6ff; }
+  .test-row.skipped { opacity: 0.6; }
+  .icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .test-info { flex: 1; min-width: 0; }
+  .test-title { font-size: 13px; color: #1e293b; }
+  .test-meta { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+  .xfail-tag { font-size: 10px; background: #dbeafe; color: #1e40af; padding: 1px 6px; border-radius: 4px; margin-left: 6px; font-weight: 600; }
+  .error-msg { font-size: 11px; color: #dc2626; margin-top: 4px; font-family: monospace; background: #fef2f2; padding: 4px 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-all; }
+  .duration { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Groomnice — Test Dashboard</h1>
+  <p>Run: 5/12/2026, 8:44:19 AM &nbsp;·&nbsp; 94.5s total</p>
+</header>
+<div class="summary">
+  <div class="stat pass">✅ 69 Passed</div>
+  <div class="stat fail">❌ 0 Failed</div>
+  <div class="stat xfail">🔵 3 Expected Fail (known gaps)</div>
+  <div class="stat skip">⏭️ 0 Skipped</div>
+</div>
+<div class="content">
+<div class="group"><div class="group-title">Client Workflow</div><div class="suite">
+      <div class="suite-title">Client booking page — /book &nbsp;<span style="font-weight:400;color:#94a3b8">9/9 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">loads with heading and service picker</div>
+          
+        </div>
+        <span class="duration">0.90s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">service pill highlights when selected</div>
+          
+        </div>
+        <span class="duration">0.91s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">date grid shows available days or no-slots message</div>
+          
+        </div>
+        <span class="duration">0.86s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">selecting a date reveals the time slot grid</div>
+          
+        </div>
+        <span class="duration">1.07s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Next button is disabled until both date and time are chosen</div>
+          
+        </div>
+        <span class="duration">1.16s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Next advances to info form with service/date/time summary</div>
+          
+        </div>
+        <span class="duration">1.22s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">back button on info form returns to slot picker</div>
+          
+        </div>
+        <span class="duration">1.31s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Request Appointment button is disabled when form is empty</div>
+          
+        </div>
+        <span class="duration">1.28s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">full submission shows Request Sent confirmation screen</div>
+          
+        </div>
+        <span class="duration">1.44s</span>
+      </div></div><div class="suite">
+      <div class="suite-title">Client booking — groomer side effects &nbsp;<span style="font-weight:400;color:#94a3b8">2/3 passed · 1 known gaps</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">submitted online booking appears on Today tab as Needs Review</div>
+          
+        </div>
+        <span class="duration">1.32s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">groomer can confirm a pending online booking</div>
+          
+        </div>
+        <span class="duration">1.58s</span>
+      </div><div class="test-row xfail">
+        <span class="icon">🔵</span>
+        <div class="test-info">
+          <div class="test-title">groomer can decline a pending online booking — it disappears<span class="xfail-tag">known gap</span></div>
+          <div class="error-msg">Error: [2mexpect([22m[31mreceived[39m[2m).[22mtoBe[2m([22m[32mexpected[39m[2m) // Object.is equality[22m
+
+Expected: [32m10[39m</div>
+        </div>
+        <span class="duration">1.61s</span>
+      </div></div><div class="suite">
+      <div class="suite-title">Client pet profile page — /profile/:token &nbsp;<span style="font-weight:400;color:#94a3b8">2/2 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">valid token shows pet profile, not an error</div>
+          
+        </div>
+        <span class="duration">1.03s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">invalid token shows error message</div>
+          
+        </div>
+        <span class="duration">1.02s</span>
+      </div></div><div class="suite">
+      <div class="suite-title">Client vaccine upload page — /vaccine/:token &nbsp;<span style="font-weight:400;color:#94a3b8">1/2 passed · 1 known gaps</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">valid token loads vaccine upload page</div>
+          
+        </div>
+        <span class="duration">0.97s</span>
+      </div><div class="test-row xfail">
+        <span class="icon">🔵</span>
+        <div class="test-info">
+          <div class="test-title">invalid token on vaccine page shows error — KNOWN GAP<span class="xfail-tag">known gap</span></div>
+          <div class="error-msg">Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+Locator: getByText(/invalid|expired|not found/i)</div>
+        </div>
+        <span class="duration">5.93s</span>
+      </div></div></div><div class="group"><div class="group-title">Clients (existing)</div><div class="suite">
+      <div class="suite-title">Clients tab &nbsp;<span style="font-weight:400;color:#94a3b8">12/12 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">loads and shows client list</div>
+          
+        </div>
+        <span class="duration">0.94s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">shows exactly 6 clients from seed data</div>
+          
+        </div>
+        <span class="duration">0.95s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">vaccine status icons are present on every client card</div>
+          
+        </div>
+        <span class="duration">0.95s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">search filters by client name — hides non-matching clients</div>
+          
+        </div>
+        <span class="duration">0.97s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">search filters by pet name — only owner of that pet shown</div>
+          
+        </div>
+        <span class="duration">0.97s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">search with no match shows empty state, not a client card</div>
+          
+        </div>
+        <span class="duration">0.95s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">clearing search restores all 6 clients</div>
+          
+        </div>
+        <span class="duration">1.11s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">tapping a client opens edit drawer with client data</div>
+          
+        </div>
+        <span class="duration">0.98s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">edit drawer pre-fills client name and phone</div>
+          
+        </div>
+        <span class="duration">0.99s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">edit drawer shows all pets for multi-pet client</div>
+          
+        </div>
+        <span class="duration">1.00s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">edit drawer saves name change and list updates immediately</div>
+          
+        </div>
+        <span class="duration">1.19s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">close button dismisses drawer without saving</div>
+          
+        </div>
+        <span class="duration">1.04s</span>
+      </div></div></div><div class="group"><div class="group-title">Customer Intake (existing)</div><div class="suite">
+      <div class="suite-title">Pet profile page &nbsp;<span style="font-weight:400;color:#94a3b8">6/6 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">valid token shows pet list, not an error</div>
+          
+        </div>
+        <span class="duration">1.04s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">invalid token shows error message, not a profile</div>
+          
+        </div>
+        <span class="duration">1.02s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Jane's profile shows Biscuit in the pet list</div>
+          
+        </div>
+        <span class="duration">1.00s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">at least one Edit button per pet, and clicking it shows the edit form</div>
+          
+        </div>
+        <span class="duration">1.06s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">edit form pre-fills pet name from existing data</div>
+          
+        </div>
+        <span class="duration">1.09s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Add another pet button is visible and clickable</div>
+          
+        </div>
+        <span class="duration">1.06s</span>
+      </div></div><div class="suite">
+      <div class="suite-title">Vaccine upload page &nbsp;<span style="font-weight:400;color:#94a3b8">2/3 passed · 1 known gaps</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">valid token loads the vaccine page</div>
+          
+        </div>
+        <span class="duration">0.94s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">vaccine page shows a file upload input</div>
+          
+        </div>
+        <span class="duration">0.92s</span>
+      </div><div class="test-row xfail">
+        <span class="icon">🔵</span>
+        <div class="test-info">
+          <div class="test-title">invalid token on vaccine page shows error<span class="xfail-tag">known gap</span></div>
+          <div class="error-msg">Error: [2mexpect([22m[31mlocator[39m[2m).[22mtoBeVisible[2m([22m[2m)[22m failed
+
+Locator: getByText(/invalid|expired|not found/i)</div>
+        </div>
+        <span class="duration">5.95s</span>
+      </div></div></div><div class="group"><div class="group-title">Groomer Dashboard (existing)</div><div class="suite">
+      <div class="suite-title">Today tab — groomer dashboard &nbsp;<span style="font-weight:400;color:#94a3b8">10/10 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">loads and shows appointment cards</div>
+          
+        </div>
+        <span class="duration">0.97s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">shows today's date in header</div>
+          
+        </div>
+        <span class="duration">0.99s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">shows exactly 7 appointment cards from seed data</div>
+          
+        </div>
+        <span class="duration">0.93s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">shows Ready badge only for vaccine-valid confirmed appointments</div>
+          
+        </div>
+        <span class="duration">0.94s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">shows pet name alongside owner name on each card</div>
+          
+        </div>
+        <span class="duration">0.96s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">floating + button is visible and has correct aria-label</div>
+          
+        </div>
+        <span class="duration">0.94s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">+ button opens booking drawer with all required fields</div>
+          
+        </div>
+        <span class="duration">1.06s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">booking drawer creates appointment and card count increases</div>
+          
+        </div>
+        <span class="duration">1.92s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Start button changes status to Grooming on that specific card</div>
+          
+        </div>
+        <span class="duration">1.11s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">bottom nav has exactly 5 tabs with correct labels</div>
+          
+        </div>
+        <span class="duration">1.01s</span>
+      </div></div></div><div class="group"><div class="group-title">Groomer Workflow</div><div class="suite">
+      <div class="suite-title">Groomer Today tab — core workflow &nbsp;<span style="font-weight:400;color:#94a3b8">6/6 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">shows 7 appointment cards from seed data</div>
+          
+        </div>
+        <span class="duration">0.94s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">cards are ordered by time — earliest appointment first</div>
+          
+        </div>
+        <span class="duration">1.01s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Ready badge only appears on vaccine-valid confirmed appointments</div>
+          
+        </div>
+        <span class="duration">0.95s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Start button changes card status to Grooming</div>
+          
+        </div>
+        <span class="duration">1.12s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Done button on in-progress card marks it completed</div>
+          
+        </div>
+        <span class="duration">1.43s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Text button exists on every non-done appointment card</div>
+          
+        </div>
+        <span class="duration">0.96s</span>
+      </div></div><div class="suite">
+      <div class="suite-title">Groomer booking drawer &nbsp;<span style="font-weight:400;color:#94a3b8">4/4 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">+ button opens drawer with all required fields</div>
+          
+        </div>
+        <span class="duration">1.05s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">creating a booking shows Profile Link AND Vaccine Link copy buttons</div>
+          
+        </div>
+        <span class="duration">1.28s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">profile URL and vaccine URL both contain the intake token</div>
+          
+        </div>
+        <span class="duration">1.30s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">new booking card appears on Today tab after creation</div>
+          
+        </div>
+        <span class="duration">1.94s</span>
+      </div></div><div class="suite">
+      <div class="suite-title">Groomer Settings — Working Hours &nbsp;<span style="font-weight:400;color:#94a3b8">6/6 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Working Hours section is visible with correct heading</div>
+          
+        </div>
+        <span class="duration">0.91s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">7 day-of-week toggle buttons are shown</div>
+          
+        </div>
+        <span class="duration">0.91s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">Mon–Fri are active by default (violet), Sat–Sun are inactive</div>
+          
+        </div>
+        <span class="duration">0.93s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">toggling a day off deselects it visually</div>
+          
+        </div>
+        <span class="duration">1.28s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">opens and closes time inputs are present</div>
+          
+        </div>
+        <span class="duration">0.91s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">slot duration button shows 30 or 60 min and toggles</div>
+          
+        </div>
+        <span class="duration">1.36s</span>
+      </div></div></div><div class="group"><div class="group-title">Reports (existing)</div><div class="suite">
+      <div class="suite-title">Reports tab &nbsp;<span style="font-weight:400;color:#94a3b8">9/9 passed</span></div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">loads page with Reports heading and three revenue cards</div>
+          
+        </div>
+        <span class="duration">0.96s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">each revenue card shows a non-negative dollar amount</div>
+          
+        </div>
+        <span class="duration">1.00s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">month revenue is always >= week >= today</div>
+          
+        </div>
+        <span class="duration">0.96s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">by-service section shows named services with revenue</div>
+          
+        </div>
+        <span class="duration">0.95s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">appointment history section always renders (not gated on revenue load)</div>
+          
+        </div>
+        <span class="duration">0.94s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">history shows exactly 10 past completed entries from seed</div>
+          
+        </div>
+        <span class="duration">0.98s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">each history row shows date, pet, client, service, and price</div>
+          
+        </div>
+        <span class="duration">1.00s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">search filters history and hides non-matching rows</div>
+          
+        </div>
+        <span class="duration">1.41s</span>
+      </div><div class="test-row passed">
+        <span class="icon">✅</span>
+        <div class="test-info">
+          <div class="test-title">search with no match shows empty state, not history rows</div>
+          
+        </div>
+        <span class="duration">1.39s</span>
+      </div></div></div></div></body></html>
