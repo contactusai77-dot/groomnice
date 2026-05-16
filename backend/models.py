@@ -78,6 +78,15 @@ class VaccineSubmission(Base):
     pet = relationship("PetProfile", back_populates="vaccine_submissions")
 
 
+class WaitlistEntry(Base):
+    __tablename__ = "waitlist"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    phone = Column(String, nullable=False)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class GroomerSettings(Base):
     __tablename__ = "groomer_settings"
 

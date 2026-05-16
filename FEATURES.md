@@ -13,6 +13,10 @@
 - **Pending Requests** section: online booking requests appear at top with **Confirm** and **Decline** buttons
 - Revenue earned today shown in header (completed appointments only)
 - Floating **+** button to create same-day appointments
+- **List / Calendar view toggle**: switch between appointment list and a day-view time grid
+  - Calendar view shows every working-hours slot as a row
+  - Booked slots display pet name, service, status dot
+  - Open slots display as green "Available" — tap any to open quick-book drawer with time pre-filled
 
 ### New Appointment Drawer (groomer-created)
 - Quick-book form: phone, client name, pet name, service, time
@@ -47,6 +51,7 @@
 - Automation toggles (Twilio SMS — wired, activates when credentials are added):
   - Send 24-hour reminder text
   - Send "Fill My Gap" text on cancellation
+- **Gap Fill Waitlist**: add/remove clients (name + phone) who get auto-texted when a slot opens due to cancellation
 
 ---
 
@@ -77,7 +82,12 @@
 
 - **FastAPI** + **SQLAlchemy** backend (SQLite local, Postgres on Railway)
 - **Twilio SMS stub**: wired at all booking creation points, no-op until `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` env vars are set
-- SMS triggers: new groomer booking (profile + vaccine links), online booking received, booking confirmed
+- SMS triggers:
+  - New groomer booking (profile + vaccine links)
+  - Online booking received, booking confirmed
+  - **Vaccine reminder**: on booking confirm, if vaccine is missing or expired → targeted SMS with upload link (distinguishes "missing" vs "expired" in message)
+  - **Gap fill**: on cancellation, if `send_gap_fill_text` toggle is on → SMS all waitlist entries with open slot times + booking link
+- **WaitlistEntry model**: stores phone + name for gap-fill notification recipients
 - `POST /api/seed?key=groomnice2026` — re-seeds demo data on prod
 - Deployed on **Railway**: `groomnice-production.up.railway.app`
 - GitHub: `contactusai77-dot/groomnice`

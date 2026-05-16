@@ -16,8 +16,8 @@ from sqlalchemy.orm import Session
 load_dotenv()
 
 from database import Base, engine, get_db
-from models import Booking, Client, GroomerSettings, PetProfile, VaccineSubmission
-from services.sms import send_booking_confirmation, send_booking_request_received, send_intake_link, send_vaccine_link
+from models import Booking, Client, GroomerSettings, PetProfile, VaccineSubmission, WaitlistEntry
+from services.sms import send_booking_confirmation, send_booking_request_received, send_gap_notification, send_intake_link, send_vaccine_link, send_vaccine_reminder
 from services.vision import extract_vaccine_info
 
 Base.metadata.create_all(bind=engine)
@@ -91,6 +91,10 @@ class OnlineBookingRequest(BaseModel):
     slot_date: str   # "YYYY-MM-DD"
     slot_time: str   # "HH:MM"
 
+class WaitlistAdd(BaseModel):
+    phone: str
+    name: str
+
 class ClientUpdate(BaseModel):
     name: str
     phone: str
@@ -129,6 +133,31 @@ def _get_settings(db: Session) -> GroomerSettings:
         db.commit()
         db.refresh(s)
     return s
+
+def _find_open_slots_today(db: Session, settings: GroomerSettings) -> list:
+    wh = settings.working_hours or DEFAULT_WORKING_HOURS
+    today = datetime.utcnow().date()
+    today_idx = today.weekday()  # 0=Mon … 6=Sun
+    if today_idx not in wh.get("days", []):
+        return []
+    start_h, start_m = map(int, wh["start"].split(":"))
+    end_h, end_m = map(int, wh["end"].split(":"))
+    slot_mins = wh.get("slot_minutes", 60)
+    slots, cur, end_t = [], start_h * 60 + start_m, end_h * 60 + end_m
+    while cur < end_t:
+        h, m = divmod(cur, 60)
+        slots.append(f"{h:02d}:{m:02d}")
+        cur += slot_mins
+    today_start = datetime.combine(today, dt_time.min)
+    tomorrow = today_start + timedelta(days=1)
+    bookings = db.query(Booking).filter(
+        Booking.appointment_date >= today_start,
+        Booking.appointment_date < tomorrow,
+        Booking.status.in_(["confirmed", "in_progress", "pending_review"]),
+    ).all()
+    booked = {f"{b.appointment_date.hour:02d}:{b.appointment_date.minute:02d}" for b in bookings if b.appointment_date}
+    open_slots = [s for s in slots if s not in booked]
+    return [f"{int(s[:2]) % 12 or 12}:{s[3:]} {'AM' if int(s[:2]) < 12 else 'PM'}" for s in open_slots]
 
 def _get_prices(db: Session) -> dict:
     s = _get_settings(db)
@@ -508,6 +537,18 @@ def update_status(booking_id: str, body: StatusUpdate, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Not found")
     b.status = body.status
     db.commit()
+    if body.status == "confirmed" and b.client:
+        pet = b.pet or (b.client.pet_profiles[0] if b.client.pet_profiles else None)
+        if not _vaccine_ok(pet):
+            expired = bool(pet and pet.rabies_expiry)
+            send_vaccine_reminder(b.client.phone, b.client.name, b.client.intake_token, expired=expired)
+    if body.status == "cancelled":
+        settings = _get_settings(db)
+        if settings.send_gap_fill_text:
+            open_slots = _find_open_slots_today(db, settings)
+            if open_slots:
+                for entry in db.query(WaitlistEntry).all():
+                    send_gap_notification(entry.phone, entry.name, open_slots)
     return {"success": True}
 
 
@@ -743,6 +784,31 @@ def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
     db.commit()
     return {"success": True}
 
+
+
+# ── Waitlist ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/waitlist")
+def get_waitlist(db: Session = Depends(get_db)):
+    entries = db.query(WaitlistEntry).order_by(WaitlistEntry.created_at.asc()).all()
+    return [{"id": e.id, "phone": e.phone, "name": e.name} for e in entries]
+
+@app.post("/api/waitlist")
+def add_waitlist(body: WaitlistAdd, db: Session = Depends(get_db)):
+    entry = WaitlistEntry(phone=body.phone, name=body.name)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return {"id": entry.id, "phone": entry.phone, "name": entry.name}
+
+@app.delete("/api/waitlist/{entry_id}")
+def remove_waitlist(entry_id: str, db: Session = Depends(get_db)):
+    entry = db.query(WaitlistEntry).filter(WaitlistEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(entry)
+    db.commit()
+    return {"success": True}
 
 
 # ── Serve React build ─────────────────────────────────────────────────────────

@@ -107,6 +107,12 @@ export interface SettingsData {
   working_hours: WorkingHours;
 }
 
+export interface WaitlistEntryData {
+  id: string;
+  phone: string;
+  name: string;
+}
+
 export interface RevenuePeriod { revenue: number; count: number; }
 export interface RevenueData {
   today: RevenuePeriod;
@@ -207,6 +213,13 @@ export const api = {
 
   updateSettings: (data: Partial<SettingsData>) =>
     request<{ success: boolean }>("/settings", { method: "PATCH", body: JSON.stringify(data) }),
+
+  // Waitlist
+  getWaitlist: () => request<WaitlistEntryData[]>("/waitlist"),
+  addWaitlist: (phone: string, name: string) =>
+    request<WaitlistEntryData>("/waitlist", { method: "POST", body: JSON.stringify({ phone, name }) }),
+  removeWaitlist: (id: string) =>
+    request<{ success: boolean }>(`/waitlist/${id}`, { method: "DELETE" }),
 
   // Edit client / pet (groomer)
   updateClient: (id: string, data: { name: string; phone: string }) =>

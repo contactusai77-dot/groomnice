@@ -1,5 +1,6 @@
+import { Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { SettingsData, WorkingHours, api } from "../api/client";
+import { SettingsData, WaitlistEntryData, WorkingHours, api } from "../api/client";
 
 const SERVICES = ["Full Groom", "Bath & Cut", "Bath", "Nail Trim", "Puppy Cut", "De-shed"];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -7,8 +8,14 @@ const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default function SettingsPage() {
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [flash, setFlash] = useState<"saving" | "saved" | null>(null);
+  const [waitlist, setWaitlist] = useState<WaitlistEntryData[]>([]);
+  const [wlForm, setWlForm] = useState({ phone: "", name: "" });
+  const [wlAdding, setWlAdding] = useState(false);
 
-  useEffect(() => { api.getSettings().then(setSettings); }, []);
+  useEffect(() => {
+    api.getSettings().then(setSettings);
+    api.getWaitlist().then(setWaitlist);
+  }, []);
 
   async function save(updated: SettingsData) {
     setSettings(updated);
@@ -55,6 +62,24 @@ export default function SettingsPage() {
     if (!settings) return;
     const current = settings.working_hours.slot_minutes;
     save({ ...settings, working_hours: { ...settings.working_hours, slot_minutes: current === 60 ? 30 : 60 } });
+  }
+
+  async function addWaitlist(e: React.FormEvent) {
+    e.preventDefault();
+    if (!wlForm.phone || !wlForm.name) return;
+    setWlAdding(true);
+    try {
+      const entry = await api.addWaitlist(wlForm.phone, wlForm.name);
+      setWaitlist(w => [...w, entry]);
+      setWlForm({ phone: "", name: "" });
+    } finally {
+      setWlAdding(false);
+    }
+  }
+
+  async function removeWaitlist(id: string) {
+    await api.removeWaitlist(id);
+    setWaitlist(w => w.filter(e => e.id !== id));
   }
 
   if (!settings) {
@@ -183,6 +208,59 @@ export default function SettingsPage() {
           checked={settings.send_gap_fill_text}
           onToggle={() => toggle("send_gap_fill_text")}
         />
+
+        <Section title="Gap Fill Waitlist" />
+
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3">
+          <p className="text-xs text-gray-400">
+            These clients get a text when a slot opens due to a cancellation.
+          </p>
+
+          {waitlist.length > 0 && (
+            <div className="space-y-2">
+              {waitlist.map(e => (
+                <div key={e.id} className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800">{e.name}</p>
+                    <p className="text-xs text-gray-400">{e.phone}</p>
+                  </div>
+                  <button
+                    onClick={() => removeWaitlist(e.id)}
+                    className="p-1.5 text-gray-300 active:text-red-400 transition"
+                    aria-label="Remove"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+              <hr className="border-gray-100" />
+            </div>
+          )}
+
+          <form onSubmit={addWaitlist} className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Name"
+              value={wlForm.name}
+              onChange={e => setWlForm(f => ({ ...f, name: e.target.value }))}
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+            <input
+              type="tel"
+              placeholder="Phone"
+              value={wlForm.phone}
+              onChange={e => setWlForm(f => ({ ...f, phone: e.target.value }))}
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+            <button
+              type="submit"
+              disabled={wlAdding}
+              className="px-3 py-2 bg-violet-600 text-white rounded-xl text-sm font-semibold disabled:opacity-50 active:bg-violet-700 transition"
+            >
+              Add
+            </button>
+          </form>
+        </div>
 
         {flash && (
           <p className={`text-center text-sm ${flash === "saved" ? "text-green-500" : "text-gray-400"}`}>

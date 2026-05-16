@@ -8,12 +8,13 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  initialTime?: string;
 }
 
-export default function BookingDrawer({ open, onClose, onSuccess }: Props) {
+export default function BookingDrawer({ open, onClose, onSuccess, initialTime }: Props) {
   const [form, setForm] = useState({
     phone: "", client_name: "", pet_name: "",
-    service_type: "Full Groom", appointment_time: "",
+    service_type: "Full Groom", appointment_time: initialTime ?? "",
   });
   const [status, setStatus] = useState<"idle" | "loading" | "done">("idle");
   const [profileUrl, setProfileUrl] = useState("");
@@ -51,7 +52,7 @@ export default function BookingDrawer({ open, onClose, onSuccess }: Props) {
 
   function reset() {
     setStatus("idle");
-    setForm({ phone: "", client_name: "", pet_name: "", service_type: "Full Groom", appointment_time: "" });
+    setForm({ phone: "", client_name: "", pet_name: "", service_type: "Full Groom", appointment_time: initialTime ?? "" });
     setProfileUrl("");
     setVaccineUrl("");
     setCopied(null);

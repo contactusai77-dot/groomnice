@@ -48,3 +48,18 @@ def send_booking_confirmation(phone: str, name: str) -> bool:
 
 def send_booking_request_received(phone: str, name: str) -> bool:
     return send_sms(phone, f"Hi {name}! We received your booking request and will confirm within the hour.")
+
+
+def send_gap_notification(phone: str, name: str, times: list) -> bool:
+    time_str = ", ".join(times[:3])
+    url = f"{_base()}/book"
+    return send_sms(phone, f"Hi {name}! A slot just opened up today ({time_str}). Book here: {url}")
+
+
+def send_vaccine_reminder(phone: str, name: str, token: str, expired: bool = False) -> bool:
+    url = f"{_base()}/vaccine/{token}"
+    reason = "expired" if expired else "missing from our records"
+    return send_sms(
+        phone,
+        f"Hi {name}! Your grooming appointment is confirmed. Your pet's vaccine cert is {reason} — please upload a current one before your visit: {url}",
+    )
