@@ -1,5 +1,5 @@
 import { Check, ClipboardCopy, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api/client";
 
 const SERVICES = ["Bath", "Bath & Cut", "Nail Trim", "Full Groom", "Puppy Cut", "De-shed"];
@@ -21,6 +21,10 @@ export default function BookingDrawer({ open, onClose, onSuccess, initialTime }:
   const [vaccineUrl, setVaccineUrl] = useState("");
   const [copied, setCopied] = useState<"profile" | "vaccine" | null>(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (open) setForm(f => ({ ...f, appointment_time: initialTime ?? "" }));
+  }, [open, initialTime]);
 
   function set(key: keyof typeof form) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>

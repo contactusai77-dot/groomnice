@@ -12,8 +12,27 @@ def test_get_settings_returns_all_fields(client):
     assert r.status_code == 200
     body = r.json()
     for field in ("require_deposit", "send_24h_reminder", "send_gap_fill_text",
-                  "deposit_amount", "service_prices"):
+                  "deposit_amount", "service_prices", "working_hours"):
         assert field in body, f"Missing '{field}' in settings"
+
+
+def test_working_hours_has_required_subfields(client):
+    wh = client.get("/api/settings").json()["working_hours"]
+    assert "days" in wh and isinstance(wh["days"], list)
+    assert "start" in wh and isinstance(wh["start"], str)
+    assert "end" in wh and isinstance(wh["end"], str)
+    assert "slot_minutes" in wh and wh["slot_minutes"] in (30, 60)
+
+
+def test_update_working_hours(client):
+    original = client.get("/api/settings").json()["working_hours"]
+    new_wh = {**original, "slot_minutes": 30}
+    r = client.patch("/api/settings", json={"working_hours": new_wh})
+    assert r.status_code == 200
+    updated = client.get("/api/settings").json()["working_hours"]
+    assert updated["slot_minutes"] == 30
+    # Restore
+    client.patch("/api/settings", json={"working_hours": original})
 
 
 def test_service_prices_has_all_services(client):
