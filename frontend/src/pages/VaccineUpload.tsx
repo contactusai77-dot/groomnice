@@ -1,16 +1,30 @@
-import { useState } from "react";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useParams, useSearchParams } from "react-router-dom";
 import { api, VaccineResult } from "../api/client";
 
 type Status = "idle" | "uploading" | "done" | "review";
 
 export default function VaccineUpload() {
   const { token } = useParams<{ token: string }>();
+  const [searchParams] = useSearchParams();
+  const petId = searchParams.get("pet_id") ?? undefined;
+
+  const [petName, setPetName] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<VaccineResult | null>(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!token) return;
+    api.getProfile(token).then(profile => {
+      const pet = petId
+        ? profile.pets.find(p => p.id === petId)
+        : profile.pets[0];
+      setPetName(pet?.pet_name ?? profile.client_name ?? null);
+    }).catch(() => {});
+  }, [token, petId]);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -26,7 +40,7 @@ export default function VaccineUpload() {
     setStatus("uploading");
     setError("");
     try {
-      const res = await api.uploadVaccine(token, file);
+      const res = await api.uploadVaccine(token, file, petId);
       setResult(res);
       setStatus(res.needs_review ? "review" : "done");
     } catch (err) {
@@ -47,14 +61,12 @@ export default function VaccineUpload() {
       <Screen>
         <div className="text-center">
           <div className="text-5xl mb-3">✅</div>
-          <h2 className="text-2xl font-bold text-gray-800 mb-1">Certificate Saved!</h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-1">All Set!</h2>
           <p className="text-gray-500 text-sm">
-            Rabies expiry on file:{" "}
-            <strong>
-              {result?.rabies_expiry ? formatDate(result.rabies_expiry) : "recorded"}
-            </strong>
+            Vaccine record received.{" "}
+            {result?.rabies_expiry && <>Expiry on file: <strong>{formatDate(result.rabies_expiry)}</strong>.</>}
           </p>
-          <p className="text-gray-400 text-sm mt-4">You're all set. See you at your appointment! 🐾</p>
+          <p className="text-gray-400 text-sm mt-4">Your groomer will review it shortly. See you at your appointment!</p>
         </div>
       </Screen>
     );
@@ -65,10 +77,9 @@ export default function VaccineUpload() {
       <Screen>
         <div className="text-center">
           <div className="text-5xl mb-3">🔍</div>
-          <h2 className="text-xl font-bold text-gray-800 mb-2">We Need a Clearer Photo</h2>
+          <h2 className="text-xl font-bold text-gray-800 mb-2">Clearer Photo Needed</h2>
           <p className="text-gray-500 text-sm mb-6">
-            The image was hard to read. Please retake it in good lighting with the expiration
-            date clearly visible.
+            Hard to read the expiry date. Please retake in good lighting with the date clearly visible.
           </p>
           <button
             onClick={retry}
@@ -83,59 +94,66 @@ export default function VaccineUpload() {
 
   return (
     <Screen>
-      <div className="text-center mb-6">
-        <div className="text-3xl mb-1">💉</div>
-        <h1 className="text-xl font-bold text-gray-800">Upload Rabies Certificate</h1>
-        <p className="text-gray-400 text-sm">We'll read the expiry date automatically</p>
+      {/* Greeting */}
+      <div className="text-center mb-8">
+        <div className="text-4xl mb-3">🐾</div>
+        <h1 className="text-2xl font-bold text-gray-800">
+          {petName ? `${petName}'s Vaccine Record` : "Vaccine Record"}
+        </h1>
+        <p className="text-gray-400 text-sm mt-1">
+          Tap the button below to take a photo of your vet record
+        </p>
       </div>
 
-      <div className="space-y-4">
-        <label className="block border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center cursor-pointer active:border-violet-400 transition">
-          {preview ? (
+      {/* Camera / file picker */}
+      <label className="block cursor-pointer">
+        {preview ? (
+          <div className="mb-4">
             <img
               src={preview}
               alt="Certificate preview"
-              className="max-h-44 mx-auto rounded-xl object-contain"
+              className="w-full rounded-2xl object-contain max-h-56 border border-gray-100"
             />
-          ) : (
-            <div>
-              <div className="text-4xl mb-2">📸</div>
-              <p className="text-gray-500 text-sm font-medium">
-                Tap to take a photo or choose from library
-              </p>
-              <p className="text-gray-400 text-xs mt-1">JPG, PNG, HEIC supported</p>
-            </div>
-          )}
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-        </label>
+            <p className="text-xs text-gray-400 text-center mt-2 truncate">{file?.name}</p>
+          </div>
+        ) : (
+          <div className="w-full bg-violet-600 text-white py-5 rounded-2xl font-semibold text-lg text-center active:bg-violet-700 transition mb-4 flex items-center justify-center gap-2">
+            <span>📷</span> Take Photo of Vet Record
+          </div>
+        )}
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+      </label>
 
-        {file && <p className="text-xs text-gray-400 text-center truncate">{file.name}</p>}
+      {error && <p className="text-red-500 text-sm text-center mb-3">{error}</p>}
 
-        {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-
+      {file && (
         <button
           onClick={handleUpload}
-          disabled={!file || status === "uploading"}
+          disabled={status === "uploading"}
           className="w-full bg-violet-600 text-white py-4 rounded-2xl font-semibold text-lg active:bg-violet-700 transition disabled:opacity-50"
         >
-          {status === "uploading" ? "Reading certificate…" : "Upload & Auto-Fill →"}
+          {status === "uploading" ? "Reading record…" : "Submit →"}
         </button>
-      </div>
+      )}
+
+      {preview && (
+        <button onClick={retry} className="w-full mt-2 py-3 text-sm text-gray-400 active:text-gray-600 transition">
+          Retake photo
+        </button>
+      )}
     </Screen>
   );
 }
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
+    month: "short", day: "numeric", year: "numeric",
   });
 }
 

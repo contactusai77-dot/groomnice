@@ -88,6 +88,7 @@ export interface AppointmentData {
   ready: boolean;
   profile_complete: boolean;
   intake_token: string | null;
+  pet_id: string | null;
   source: string;
 }
 

@@ -1,4 +1,5 @@
-import { CheckCircle, DollarSign, MessageCircle, Scissors, X } from "lucide-react";
+import { CheckCircle, DollarSign, MessageCircle, Scissors, ShieldAlert, X } from "lucide-react";
+import { useState } from "react";
 import { AppointmentData, api } from "../api/client";
 import StatusBadge from "./StatusBadge";
 
@@ -20,9 +21,27 @@ interface Props {
 }
 
 export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
+  const [shareStatus, setShareStatus] = useState<"idle" | "copied">("idle");
+
   const time = a.appointment_date
     ? new Date(a.appointment_date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "TBD";
+
+  async function handleRequestVaccine() {
+    const url = `${window.location.origin}/vaccine/${a.intake_token}${a.pet_id ? `?pet_id=${a.pet_id}` : ""}`;
+    const text = `Hi ${a.client_name}! To confirm your grooming appointment we need ${a.pet_name}'s up-to-date vaccine record. Tap the link to upload a quick photo — takes 30 seconds: ${url}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ text });
+        return;
+      } catch {
+        // user cancelled or share unsupported — fall through to clipboard
+      }
+    }
+    await navigator.clipboard.writeText(url);
+    setShareStatus("copied");
+    setTimeout(() => setShareStatus("idle"), 2000);
+  }
 
   function handleText() {
     const body = encodeURIComponent(`Hi ${a.client_name}! Just a reminder about your grooming appointment today. See you soon!`);
@@ -85,7 +104,7 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
 
       {/* Regular grooming actions */}
       {!done && !isPending && (
-        <div className="flex gap-2 mt-3 pt-3 border-t border-gray-50">
+        <div className="flex gap-2 mt-3 pt-3 border-t border-gray-50 flex-wrap">
           <Btn icon={<MessageCircle size={15} />} label="Text" color="gray" onClick={handleText} />
           <Btn
             icon={a.status === "in_progress" ? <CheckCircle size={15} /> : <Scissors size={15} />}
@@ -96,6 +115,14 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
           {!a.deposit_ok && (
             <Btn icon={<DollarSign size={15} />} label="Mark Paid" color="green" onClick={handleMarkPaid} />
           )}
+          {!a.vaccine_ok && a.intake_token && (
+            <Btn
+              icon={<ShieldAlert size={15} />}
+              label={shareStatus === "copied" ? "Link Copied!" : "Request Vaccine"}
+              color="amber"
+              onClick={handleRequestVaccine}
+            />
+          )}
         </div>
       )}
     </div>
@@ -104,13 +131,14 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
 
 function Btn({ icon, label, color, onClick }: {
   icon: React.ReactNode; label: string;
-  color: "gray" | "violet" | "green" | "red"; onClick: () => void;
+  color: "gray" | "violet" | "green" | "red" | "amber"; onClick: () => void;
 }) {
   const cls = {
     gray:   "bg-gray-50  text-gray-600  active:bg-gray-100",
     violet: "bg-violet-50 text-violet-600 active:bg-violet-100",
     green:  "bg-green-50 text-green-600  active:bg-green-100",
     red:    "bg-red-50   text-red-500    active:bg-red-100",
+    amber:  "bg-amber-50 text-amber-600  active:bg-amber-100",
   }[color];
   return (
     <button onClick={onClick} className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium ${cls}`}>

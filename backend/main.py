@@ -214,6 +214,7 @@ def _booking_dict(b, pet=None, c=None) -> dict:
         "ready": v_ok and deposit_ok,
         "profile_complete": pet.profile_complete if pet else False,
         "intake_token": c.intake_token if c else None,
+        "pet_id": pet.id if pet else None,
         "source": b.source or "groomer",
     }
 
