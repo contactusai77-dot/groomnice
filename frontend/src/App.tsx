@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import AdminPage from "./pages/AdminPage";
 import BottomNav from "./components/BottomNav";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { AuthProvider } from "./context/AuthContext";
@@ -24,6 +25,9 @@ function Layout() {
   return (
     <div className={isGroomer ? "bg-gray-50" : "min-h-screen bg-gradient-to-br from-violet-50 via-purple-50 to-pink-50"}>
       <Routes>
+        {/* ── Admin (key-gated, no groomer JWT needed) ── */}
+        <Route path="/admin" element={<AdminPage />} />
+
         {/* ── Auth ── */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

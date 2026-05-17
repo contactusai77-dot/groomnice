@@ -37,6 +37,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:4001")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+ADMIN_KEY = os.getenv("ADMIN_KEY", "admin-dev")
 
 DEFAULT_WORKING_HOURS: dict = {
     "days": [0, 1, 2, 3, 4],
@@ -980,6 +981,115 @@ def remove_waitlist(
     db.delete(entry)
     db.commit()
     return {"success": True}
+
+
+# ── Admin ─────────────────────────────────────────────────────────────────────
+
+def _require_admin(x_admin_key: Optional[str] = None, admin_key: Optional[str] = Query(None)):
+    key = x_admin_key or admin_key
+    if key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+from fastapi import Header
+
+@app.get("/api/admin/overview")
+def admin_overview(
+    x_admin_key: Optional[str] = Header(None),
+    admin_key: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_key, admin_key)
+    total_groomers = db.query(func.count(Groomer.id)).scalar()
+    total_clients = db.query(func.count(Client.id)).scalar()
+    total_bookings = db.query(func.count(Booking.id)).scalar()
+    total_revenue = db.query(func.sum(Booking.price)).filter(Booking.status == "completed").scalar() or 0.0
+    newest = db.query(Groomer).order_by(Groomer.created_at.desc()).first()
+    return {
+        "total_groomers": total_groomers,
+        "total_clients": total_clients,
+        "total_bookings": total_bookings,
+        "total_revenue": round(float(total_revenue), 2),
+        "newest_groomer": {"name": newest.name, "email": newest.email, "created_at": newest.created_at.isoformat()} if newest else None,
+    }
+
+
+@app.get("/api/admin/groomers")
+def admin_groomers(
+    x_admin_key: Optional[str] = Header(None),
+    admin_key: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_key, admin_key)
+    groomers = db.query(Groomer).order_by(Groomer.created_at.desc()).all()
+    result = []
+    for g in groomers:
+        client_count = db.query(func.count(Client.id)).filter(Client.groomer_id == g.id).scalar()
+        booking_count = db.query(func.count(Booking.id)).filter(Booking.groomer_id == g.id).scalar()
+        revenue = db.query(func.sum(Booking.price)).filter(
+            Booking.groomer_id == g.id, Booking.status == "completed"
+        ).scalar() or 0.0
+        last_booking = db.query(Booking).filter(Booking.groomer_id == g.id).order_by(Booking.created_at.desc()).first()
+        result.append({
+            "id": g.id,
+            "name": g.name,
+            "email": g.email,
+            "slug": g.slug,
+            "google_linked": bool(g.google_id),
+            "created_at": g.created_at.isoformat(),
+            "client_count": client_count,
+            "booking_count": booking_count,
+            "total_revenue": round(float(revenue), 2),
+            "last_booking_at": last_booking.created_at.isoformat() if last_booking else None,
+        })
+    return result
+
+
+@app.get("/api/admin/groomers/{groomer_id}")
+def admin_groomer_detail(
+    groomer_id: str,
+    x_admin_key: Optional[str] = Header(None),
+    admin_key: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_key, admin_key)
+    g = db.query(Groomer).filter(Groomer.id == groomer_id).first()
+    if not g:
+        raise HTTPException(status_code=404, detail="Groomer not found")
+
+    clients = db.query(Client).filter(Client.groomer_id == g.id).order_by(Client.created_at.desc()).all()
+    client_list = []
+    for c in clients:
+        last = db.query(Booking).filter(Booking.client_id == c.id).order_by(Booking.appointment_date.desc()).first()
+        client_list.append({
+            "id": c.id,
+            "name": c.name,
+            "phone": c.phone,
+            "pet_count": len(c.pet_profiles),
+            "booking_count": len(c.bookings),
+            "last_visit": last.appointment_date.isoformat() if last and last.appointment_date else None,
+        })
+
+    recent_bookings = (
+        db.query(Booking).filter(Booking.groomer_id == g.id)
+        .order_by(Booking.appointment_date.desc()).limit(20).all()
+    )
+    booking_list = [_booking_dict(b) for b in recent_bookings]
+
+    revenue = db.query(func.sum(Booking.price)).filter(
+        Booking.groomer_id == g.id, Booking.status == "completed"
+    ).scalar() or 0.0
+
+    return {
+        "id": g.id,
+        "name": g.name,
+        "email": g.email,
+        "slug": g.slug,
+        "google_linked": bool(g.google_id),
+        "created_at": g.created_at.isoformat(),
+        "total_revenue": round(float(revenue), 2),
+        "clients": client_list,
+        "recent_bookings": booking_list,
+    }
 
 
 # ── Serve React build ─────────────────────────────────────────────────────────
