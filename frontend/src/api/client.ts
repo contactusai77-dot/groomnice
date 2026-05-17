@@ -49,6 +49,35 @@ export interface PetData {
   notes: string | null;
   rabies_expiry: string | null;
   profile_complete: boolean;
+  temperament: "friendly" | "anxious" | "aggressive";
+}
+
+export interface PriceEstimate {
+  price: number | null;
+  duration_minutes: number;
+  notes: string;
+  error?: boolean;
+}
+
+export interface RouteStop {
+  booking_id: string;
+  client_name: string;
+  client_phone: string;
+  pet_name: string;
+  service_type: string;
+  appointment_date: string | null;
+  status: string;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  drive_minutes: number | null;
+  drive_miles: number | null;
+}
+
+export interface RouteData {
+  stops: RouteStop[];
+  has_locations: boolean;
+  geo_count: number;
 }
 
 export interface PetFormData {
@@ -89,6 +118,7 @@ export interface AppointmentData {
   profile_complete: boolean;
   intake_token: string | null;
   pet_id: string | null;
+  temperament: "friendly" | "anxious" | "aggressive";
   source: string;
 }
 
@@ -109,6 +139,7 @@ export interface ClientData {
   name: string;
   phone: string;
   intake_token: string;
+  address: string | null;
   pets: PetData[];
   vaccine_ok: boolean;
   last_visit: string | null;
@@ -128,6 +159,8 @@ export interface SettingsData {
   deposit_amount: number;
   service_prices: Record<string, number>;
   working_hours: WorkingHours;
+  onboarding_complete: boolean;
+  is_mobile: boolean;
 }
 
 export interface WaitlistEntryData {
@@ -269,9 +302,17 @@ export const api = {
     request<{ success: boolean }>(`/waitlist/${id}`, { method: "DELETE" }),
 
   // Edit client / pet (groomer)
-  updateClient: (id: string, data: { name: string; phone: string }) =>
+  updateClient: (id: string, data: { name: string; phone: string; address?: string }) =>
     request<{ success: boolean }>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
 
-  updatePetGroomer: (petId: string, data: { pet_name: string; breed: string; age: string; weight: string; notes: string }) =>
+  updatePetGroomer: (petId: string, data: { pet_name: string; breed: string; age: string; weight: string; notes: string; temperament: string }) =>
     request<{ success: boolean }>(`/pets/${petId}`, { method: "PATCH", body: JSON.stringify(data) }),
+
+  priceEstimate: (data: { breed: string; service_type: string; temperament: string; coat_condition: string }) =>
+    request<PriceEstimate>("/price-estimate", { method: "POST", body: JSON.stringify(data) }),
+
+  getRoute: () => request<RouteData>("/route/today"),
+
+  submitFeedback: (data: { email: string; type: string; message: string }) =>
+    request<{ success: boolean }>("/feedback", { method: "POST", body: JSON.stringify(data) }),
 };

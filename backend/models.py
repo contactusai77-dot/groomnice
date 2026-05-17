@@ -33,6 +33,9 @@ class Client(Base):
     phone = Column(String, nullable=False)
     name = Column(String, nullable=False)
     intake_token = Column(String, unique=True, default=_uuid)
+    address = Column(String, nullable=True)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     groomer = relationship("Groomer", back_populates="clients")
@@ -55,6 +58,7 @@ class PetProfile(Base):
     rabies_expiry = Column(String)
     profile_complete = Column(Boolean, default=False)
     completed_at = Column(DateTime)
+    temperament = Column(String, default="friendly")  # friendly | anxious | aggressive
 
     client = relationship("Client", back_populates="pet_profiles")
     bookings = relationship("Booking", back_populates="pet")
@@ -109,6 +113,16 @@ class WaitlistEntry(Base):
     groomer = relationship("Groomer", back_populates="waitlist")
 
 
+class Feedback(Base):
+    __tablename__ = "feedback"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    email = Column(String, nullable=True)
+    type = Column(String, default="general")  # bug | feature | general
+    message = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class GroomerSettings(Base):
     __tablename__ = "groomer_settings"
 
@@ -119,5 +133,7 @@ class GroomerSettings(Base):
     deposit_amount = Column(Float, default=25.0)
     service_prices = Column(JSON, nullable=True)
     working_hours = Column(JSON, nullable=True)
+    onboarding_complete = Column(Boolean, default=False)
+    is_mobile = Column(Boolean, default=False)
 
     groomer = relationship("Groomer", back_populates="settings")

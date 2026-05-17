@@ -1,5 +1,8 @@
+import json
+import math
 import os
 import re
+import urllib.parse
 import uuid
 from datetime import date, datetime, time as dt_time, timedelta
 from pathlib import Path
@@ -18,7 +21,7 @@ from sqlalchemy.orm import Session
 load_dotenv()
 
 from database import Base, engine, get_db
-from models import Booking, Client, Groomer, GroomerSettings, PetProfile, VaccineSubmission, WaitlistEntry
+from models import Booking, Client, Feedback, Groomer, GroomerSettings, PetProfile, VaccineSubmission, WaitlistEntry
 from auth import create_access_token, get_current_groomer, hash_password, verify_password
 from services.sms import (
     send_booking_confirmation,
@@ -29,6 +32,7 @@ from services.sms import (
     send_vaccine_reminder,
 )
 from services.vision import extract_vaccine_info
+from services.pricing import estimate_price
 
 Base.metadata.create_all(bind=engine)
 
@@ -107,6 +111,8 @@ class SettingsUpdate(BaseModel):
     deposit_amount: Optional[float] = None
     service_prices: Optional[dict] = None
     working_hours: Optional[dict] = None
+    onboarding_complete: Optional[bool] = None
+    is_mobile: Optional[bool] = None
 
 class OnlineBookingRequest(BaseModel):
     phone: str
@@ -123,6 +129,7 @@ class WaitlistAdd(BaseModel):
 class ClientUpdate(BaseModel):
     name: str
     phone: str
+    address: str = ""
 
 class PetUpdate(BaseModel):
     pet_name: str = ""
@@ -130,6 +137,18 @@ class PetUpdate(BaseModel):
     age: str = ""
     weight: str = ""
     notes: str = ""
+    temperament: str = "friendly"
+
+class PriceEstimateRequest(BaseModel):
+    breed: str = ""
+    service_type: str = "Full Groom"
+    temperament: str = "friendly"
+    coat_condition: str = "normal"
+
+class FeedbackCreate(BaseModel):
+    email: str = ""
+    type: str = "general"
+    message: str
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -192,6 +211,30 @@ def _get_prices(db: Session, groomer_id: str) -> dict:
     s = _get_settings(db, groomer_id)
     return s.service_prices or DEFAULT_PRICES
 
+def _haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    R = 3958.8
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
+    return R * 2 * math.asin(math.sqrt(a))
+
+async def _geocode(address: str) -> Optional[tuple]:
+    token = os.getenv("MAPBOX_TOKEN")
+    if not token or not address.strip():
+        return None
+    encoded = urllib.parse.quote(address.strip())
+    url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{encoded}.json?access_token={token}&limit=1&country=us"
+    try:
+        async with httpx.AsyncClient() as hc:
+            r = await hc.get(url, timeout=5)
+            features = r.json().get("features", [])
+            if features:
+                lng, lat = features[0]["geometry"]["coordinates"]
+                return float(lat), float(lng)
+    except Exception:
+        pass
+    return None
+
 def _booking_dict(b, pet=None, c=None) -> dict:
     if c is None:
         c = b.client
@@ -215,6 +258,7 @@ def _booking_dict(b, pet=None, c=None) -> dict:
         "profile_complete": pet.profile_complete if pet else False,
         "intake_token": c.intake_token if c else None,
         "pet_id": pet.id if pet else None,
+        "temperament": pet.temperament if pet else "friendly",
         "source": b.source or "groomer",
     }
 
@@ -229,6 +273,7 @@ def _pet_dict(pet: PetProfile) -> dict:
         "notes": pet.notes,
         "rabies_expiry": pet.rabies_expiry,
         "profile_complete": pet.profile_complete,
+        "temperament": pet.temperament or "friendly",
     }
 
 
@@ -712,7 +757,7 @@ def get_clients(
 
 
 @app.patch("/api/clients/{client_id}")
-def update_client(
+async def update_client(
     client_id: str,
     body: ClientUpdate,
     db: Session = Depends(get_db),
@@ -723,6 +768,13 @@ def update_client(
         raise HTTPException(status_code=404, detail="Not found")
     c.name = body.name
     c.phone = normalize_phone(body.phone)
+    if body.address is not None:
+        address = body.address.strip()
+        c.address = address or None
+        if address and address != (c.address or ""):
+            geo = await _geocode(address)
+            if geo:
+                c.lat, c.lng = geo
     db.commit()
     return {"success": True}
 
@@ -742,7 +794,7 @@ def update_pet_groomer(
     )
     if not pet:
         raise HTTPException(status_code=404, detail="Not found")
-    for field in ("pet_name", "breed", "age", "weight", "notes"):
+    for field in ("pet_name", "breed", "age", "weight", "notes", "temperament"):
         setattr(pet, field, getattr(data, field))
     db.commit()
     return {"success": True}
@@ -926,6 +978,8 @@ def get_settings(
         "deposit_amount": s.deposit_amount,
         "service_prices": s.service_prices or DEFAULT_PRICES,
         "working_hours": s.working_hours or DEFAULT_WORKING_HOURS,
+        "onboarding_complete": bool(s.onboarding_complete),
+        "is_mobile": bool(s.is_mobile),
     }
 
 
@@ -940,6 +994,122 @@ def update_settings(
         setattr(s, field, value)
     db.commit()
     return {"success": True}
+
+
+# ── Dynamic pricing ───────────────────────────────────────────────────────────
+
+@app.post("/api/price-estimate")
+def price_estimate(
+    body: PriceEstimateRequest,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    result = estimate_price(body.breed, body.service_type, body.temperament, body.coat_condition)
+    return result
+
+
+# ── Smart route (mobile groomers) ─────────────────────────────────────────────
+
+@app.get("/api/route/today")
+async def get_route_today(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    today = datetime.utcnow().date()
+    today_start = datetime.combine(today, dt_time.min)
+    tomorrow = today_start + timedelta(days=1)
+    bookings = db.query(Booking).filter(
+        Booking.groomer_id == groomer.id,
+        Booking.appointment_date >= today_start,
+        Booking.appointment_date < tomorrow,
+        Booking.status.notin_(["canceled", "declined"]),
+    ).all()
+
+    stops = []
+    for b in bookings:
+        c = b.client
+        pet = b.pet or (c.pet_profiles[0] if c and c.pet_profiles else None)
+        stops.append({
+            "booking_id": b.id,
+            "client_name": c.name if c else "Unknown",
+            "client_phone": c.phone if c else "",
+            "pet_name": pet.pet_name if pet else "Unknown",
+            "service_type": b.service_type or "Full Groom",
+            "appointment_date": b.appointment_date.isoformat() if b.appointment_date else None,
+            "status": b.status,
+            "address": c.address if c else None,
+            "lat": c.lat if c else None,
+            "lng": c.lng if c else None,
+            "drive_minutes": None,
+            "drive_miles": None,
+        })
+
+    stops.sort(key=lambda s: s["appointment_date"] or "")
+    geo_stops = [s for s in stops if s["lat"] and s["lng"]]
+
+    if len(geo_stops) >= 2:
+        # Nearest-neighbor route sort
+        ordered, remaining = [stops[0]], stops[1:]
+        while remaining:
+            last = ordered[-1]
+            if last["lat"] and last["lng"]:
+                remaining.sort(
+                    key=lambda s: _haversine(last["lat"], last["lng"], s["lat"], s["lng"])
+                    if s["lat"] and s["lng"] else 9999
+                )
+            ordered.append(remaining.pop(0))
+        stops = ordered
+
+        # Drive times via Mapbox Directions
+        token = os.getenv("MAPBOX_TOKEN")
+        if token:
+            for i in range(len(stops) - 1):
+                a, b_stop = stops[i], stops[i + 1]
+                if a["lat"] and a["lng"] and b_stop["lat"] and b_stop["lng"]:
+                    try:
+                        url = (
+                            f"https://api.mapbox.com/directions/v5/mapbox/driving/"
+                            f"{a['lng']},{a['lat']};{b_stop['lng']},{b_stop['lat']}"
+                            f"?access_token={token}&overview=false"
+                        )
+                        async with httpx.AsyncClient() as hc:
+                            r = await hc.get(url, timeout=5)
+                            routes = r.json().get("routes", [])
+                            if routes:
+                                stops[i + 1]["drive_minutes"] = round(routes[0]["duration"] / 60)
+                                stops[i + 1]["drive_miles"] = round(routes[0]["distance"] / 1609.34, 1)
+                    except Exception:
+                        pass
+
+    return {"stops": stops, "has_locations": len(geo_stops) > 0, "geo_count": len(geo_stops)}
+
+
+# ── Feedback (public) ─────────────────────────────────────────────────────────
+
+@app.post("/api/feedback")
+def submit_feedback(body: FeedbackCreate, db: Session = Depends(get_db)):
+    if not body.message.strip():
+        raise HTTPException(status_code=400, detail="Message required")
+    fb = Feedback(
+        email=body.email.strip() or None,
+        type=body.type,
+        message=body.message.strip(),
+    )
+    db.add(fb)
+    db.commit()
+    return {"success": True}
+
+
+@app.get("/api/admin/feedback")
+def admin_feedback(admin_key: str = Query(...), db: Session = Depends(get_db)):
+    if admin_key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    rows = db.query(Feedback).order_by(Feedback.created_at.desc()).all()
+    return [
+        {"id": f.id, "email": f.email, "type": f.type, "message": f.message,
+         "created_at": f.created_at.isoformat()}
+        for f in rows
+    ]
 
 
 # ── Waitlist ──────────────────────────────────────────────────────────────────

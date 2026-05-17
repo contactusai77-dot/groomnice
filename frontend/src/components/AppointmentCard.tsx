@@ -84,9 +84,13 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
               <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium">Online</span>
             )}
           </div>
-          <p className="text-base font-semibold text-gray-800 mt-0.5 truncate">
-            {a.pet_name || "Unknown Pet"}
-          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <p className="text-base font-semibold text-gray-800 truncate">
+              {a.pet_name || "Unknown Pet"}
+            </p>
+            {a.temperament === "aggressive" && <span title="Aggressive — muzzle required">🔴</span>}
+            {a.temperament === "anxious" && <span title="Anxious — extra time needed">🟡</span>}
+          </div>
           {a.breed && <p className="text-sm text-gray-400">{a.breed}</p>}
           <p className="text-sm text-gray-500 mt-0.5">{a.client_name}</p>
         </div>

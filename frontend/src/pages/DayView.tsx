@@ -1,6 +1,7 @@
-import { CalendarDays, List, Plus, Scissors } from "lucide-react";
+import { CalendarDays, List, Navigation, Plus, Scissors } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { AppointmentData, SettingsData, WorkingHours, api } from "../api/client";
+import { useNavigate } from "react-router-dom";
+import { AppointmentData, RouteData, RouteStop, SettingsData, WorkingHours, api } from "../api/client";
 import AppointmentCard from "../components/AppointmentCard";
 import BookingDrawer from "../components/BookingDrawer";
 
@@ -31,12 +32,15 @@ function apptSlotKey(isoDate: string): string {
 }
 
 export default function DayView() {
+  const navigate = useNavigate();
   const [appointments, setAppointments] = useState<AppointmentData[]>([]);
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"list" | "calendar">("list");
+  const [view, setView] = useState<"list" | "calendar" | "route">("list");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTime, setDrawerTime] = useState<string | undefined>(undefined);
+  const [route, setRoute] = useState<RouteData | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long", month: "long", day: "numeric",
@@ -47,10 +51,11 @@ export default function DayView() {
       const [appts, s] = await Promise.all([api.getTodayAppointments(), api.getSettings()]);
       setAppointments(appts);
       setSettings(s);
+      if (!s.onboarding_complete) navigate("/onboarding");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [navigate]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -58,6 +63,20 @@ export default function DayView() {
   const earned = appointments
     .filter(a => a.status === "completed")
     .reduce((sum, a) => sum + (a.price ?? 0), 0);
+
+  async function loadRoute() {
+    setRouteLoading(true);
+    try {
+      setRoute(await api.getRoute());
+    } finally {
+      setRouteLoading(false);
+    }
+  }
+
+  function switchView(v: "list" | "calendar" | "route") {
+    setView(v);
+    if (v === "route" && !route) loadRoute();
+  }
 
   function openDrawerAt(time?: string) {
     setDrawerTime(time);
@@ -79,22 +98,19 @@ export default function DayView() {
             {earned > 0 && (
               <span className="text-sm font-semibold text-green-600">${earned} today</span>
             )}
-            {/* List / Calendar toggle */}
+            {/* List / Calendar / Route toggle */}
             <div className="flex border border-gray-200 rounded-xl overflow-hidden">
-              <button
-                onClick={() => setView("list")}
+              <button onClick={() => switchView("list")}
                 className={`px-2.5 py-1.5 ${view === "list" ? "bg-violet-600 text-white" : "bg-white text-gray-400"} transition`}
-                aria-label="List view"
-              >
-                <List size={15} />
-              </button>
-              <button
-                onClick={() => setView("calendar")}
+                aria-label="List view"><List size={15} /></button>
+              <button onClick={() => switchView("calendar")}
                 className={`px-2.5 py-1.5 ${view === "calendar" ? "bg-violet-600 text-white" : "bg-white text-gray-400"} transition`}
-                aria-label="Calendar view"
-              >
-                <CalendarDays size={15} />
-              </button>
+                aria-label="Calendar view"><CalendarDays size={15} /></button>
+              {settings?.is_mobile && (
+                <button onClick={() => switchView("route")}
+                  className={`px-2.5 py-1.5 ${view === "route" ? "bg-violet-600 text-white" : "bg-white text-gray-400"} transition`}
+                  aria-label="Route view"><Navigation size={15} /></button>
+              )}
             </div>
           </div>
         </div>
@@ -120,6 +136,8 @@ export default function DayView() {
               ))}
             </>
           )
+        ) : view === "route" ? (
+          <RouteView data={route} loading={routeLoading} onRefresh={loadRoute} />
         ) : (
           <CalendarView
             appointments={appointments}
@@ -239,6 +257,98 @@ function Empty({ onAdd }: { onAdd: () => void }) {
       <div className="text-5xl mb-3">✂️</div>
       <p className="text-gray-500 font-medium text-lg">No appointments today</p>
       <p className="text-gray-400 text-sm mt-1">Tap + to add one</p>
+    </div>
+  );
+}
+
+function RouteView({ data, loading, onRefresh }: { data: RouteData | null; loading: boolean; onRefresh: () => void }) {
+  if (loading) return <p className="text-center text-gray-400 py-16">Calculating route…</p>;
+  if (!data) return null;
+
+  if (data.stops.length === 0) {
+    return (
+      <div className="text-center py-16 text-gray-400">
+        <Navigation size={32} className="mx-auto mb-3 opacity-40" />
+        <p>No appointments today</p>
+      </div>
+    );
+  }
+
+  if (!data.has_locations) {
+    return (
+      <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5 text-center">
+        <p className="text-amber-700 font-medium mb-1">No addresses on file</p>
+        <p className="text-amber-600 text-sm">Add client addresses in the Clients tab to enable route optimization.</p>
+        <p className="text-xs text-amber-500 mt-2">{data.stops.length} appointments today (showing in time order)</p>
+      </div>
+    );
+  }
+
+  function openMapsRoute() {
+    const coords = data!.stops
+      .filter(s => s.lat && s.lng)
+      .map(s => `${s.lat},${s.lng}`)
+      .join("/");
+    window.open(`https://www.google.com/maps/dir/${coords}`, "_blank");
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-xs text-gray-400">
+          {data.geo_count} of {data.stops.length} stops mapped
+        </p>
+        <div className="flex gap-2">
+          <button onClick={onRefresh} className="text-xs text-violet-500 font-medium">Refresh</button>
+          {data.has_locations && (
+            <button onClick={openMapsRoute} className="text-xs text-blue-500 font-medium">Open in Maps →</button>
+          )}
+        </div>
+      </div>
+
+      {data.stops.map((stop, i) => (
+        <RouteStopCard key={stop.booking_id} stop={stop} index={i} />
+      ))}
+    </div>
+  );
+}
+
+function RouteStopCard({ stop, index }: { stop: RouteStop; index: number }) {
+  const time = stop.appointment_date
+    ? new Date(stop.appointment_date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : "TBD";
+
+  return (
+    <div>
+      {index > 0 && stop.drive_minutes != null && (
+        <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-gray-400">
+          <Navigation size={11} />
+          <span>{stop.drive_minutes} min · {stop.drive_miles} mi</span>
+        </div>
+      )}
+      {index > 0 && stop.drive_minutes == null && stop.address && (
+        <div className="flex items-center gap-2 px-4 py-1 text-xs text-gray-300">
+          <Navigation size={11} />
+          <span>—</span>
+        </div>
+      )}
+      <div className="bg-white rounded-2xl px-4 py-3 border border-gray-100 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="w-6 h-6 rounded-full bg-violet-100 text-violet-600 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+            {index + 1}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-gray-800 text-sm">{time}</span>
+              <span className="text-xs text-gray-400">{stop.service_type}</span>
+            </div>
+            <p className="text-sm font-medium text-gray-700">{stop.pet_name} · {stop.client_name}</p>
+            {stop.address
+              ? <p className="text-xs text-gray-400 truncate">📍 {stop.address}</p>
+              : <p className="text-xs text-amber-400">No address — add in Clients tab</p>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

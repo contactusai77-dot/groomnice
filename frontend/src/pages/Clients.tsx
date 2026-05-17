@@ -67,6 +67,8 @@ export default function Clients() {
   );
 }
 
+const TEMP_EMOJI: Record<string, string> = { friendly: "🟢", anxious: "🟡", aggressive: "🔴" };
+
 function ClientRow({ client: c, onEdit }: { client: ClientData; onEdit: () => void }) {
   const firstPet = c.pets[0] ?? null;
   const petLabel = firstPet?.pet_name
@@ -79,6 +81,8 @@ function ClientRow({ client: c, onEdit }: { client: ClientData; onEdit: () => vo
   const expiry = worstExpiry
     ? new Date(worstExpiry).toLocaleDateString("en-US", { month: "short", year: "numeric" })
     : null;
+  const worstTemp = c.pets.some(p => p.temperament === "aggressive") ? "aggressive"
+    : c.pets.some(p => p.temperament === "anxious") ? "anxious" : "friendly";
 
   return (
     <button
@@ -96,8 +100,11 @@ function ClientRow({ client: c, onEdit }: { client: ClientData; onEdit: () => vo
             : <AlertCircle size={13} className="text-red-400 shrink-0" />}
         </div>
         {petLabel && (
-          <p className="text-sm text-gray-500 truncate">🐾 {petLabel}{breedLabel}</p>
+          <p className="text-sm text-gray-500 truncate">
+            {TEMP_EMOJI[worstTemp]} {petLabel}{breedLabel}
+          </p>
         )}
+        {c.address && <p className="text-xs text-gray-400 truncate">📍 {c.address}</p>}
         {expiry
           ? <p className="text-xs text-gray-400">Rabies exp: {expiry}</p>
           : <p className="text-xs text-red-400">No vaccine on file</p>}
@@ -120,6 +127,7 @@ function ClientDrawer({ client, onClose, onSaved }: {
 }) {
   const [name, setName] = useState(client.name);
   const [phone, setPhone] = useState(client.phone);
+  const [address, setAddress] = useState(client.address ?? "");
   const [pets, setPets] = useState<PetData[]>(client.pets);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -128,7 +136,7 @@ function ClientDrawer({ client, onClose, onSaved }: {
     setSaving(true);
     setError("");
     try {
-      await api.updateClient(client.id, { name, phone });
+      await api.updateClient(client.id, { name, phone, address });
       for (const pet of pets) {
         await api.updatePetGroomer(pet.id, {
           pet_name: pet.pet_name ?? "",
@@ -136,6 +144,7 @@ function ClientDrawer({ client, onClose, onSaved }: {
           age: pet.age ?? "",
           weight: pet.weight ?? "",
           notes: pet.notes ?? "",
+          temperament: pet.temperament ?? "friendly",
         });
       }
       onSaved();
@@ -167,6 +176,10 @@ function ClientDrawer({ client, onClose, onSaved }: {
             <input value={phone} onChange={e => setPhone(e.target.value)}
               className={inp} placeholder="+1555..." type="tel" />
           </Field>
+          <Field label="Address (for route planning)">
+            <input value={address} onChange={e => setAddress(e.target.value)}
+              className={inp} placeholder="123 Main St, Austin TX" />
+          </Field>
         </div>
 
         {pets.length > 0 && (
@@ -195,6 +208,15 @@ function ClientDrawer({ client, onClose, onSaved }: {
                         className={inp} placeholder="45 lbs" />
                     </Field>
                   </div>
+                  <Field label="Temperament">
+                    <select value={pet.temperament ?? "friendly"}
+                      onChange={e => updatePet(pet.id, "temperament", e.target.value)}
+                      className={inp}>
+                      <option value="friendly">🟢 Friendly</option>
+                      <option value="anxious">🟡 Anxious — needs extra time</option>
+                      <option value="aggressive">🔴 Aggressive — muzzle required</option>
+                    </select>
+                  </Field>
                 </div>
               ))}
             </div>
