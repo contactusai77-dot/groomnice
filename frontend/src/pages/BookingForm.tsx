@@ -1,5 +1,6 @@
 import { CalendarDays, Check, ChevronRight, Clock } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 import { BookingSlot, api } from "../api/client";
 
 const SERVICES = ["Bath", "Bath & Cut", "Nail Trim", "Full Groom", "Puppy Cut", "De-shed"];
@@ -7,6 +8,7 @@ const SERVICES = ["Bath", "Bath & Cut", "Nail Trim", "Full Groom", "Puppy Cut", 
 type Step = "pick" | "info" | "done";
 
 export default function BookingForm() {
+  const { slug } = useParams<{ slug: string }>();
   const [slots, setSlots] = useState<BookingSlot[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(true);
   const [step, setStep] = useState<Step>("pick");
@@ -22,11 +24,12 @@ export default function BookingForm() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.getBookingSlots()
+    if (!slug) { setLoadingSlots(false); return; }
+    api.getBookingSlots(slug)
       .then(setSlots)
       .catch(() => setSlots([]))
       .finally(() => setLoadingSlots(false));
-  }, []);
+  }, [slug]);
 
   const selectedDaySlots = slots.find(s => s.date === selectedDate)?.slots ?? [];
 
@@ -40,7 +43,7 @@ export default function BookingForm() {
     setSubmitting(true);
     setError("");
     try {
-      await api.onlineBook({
+      await api.onlineBook(slug ?? "demo", {
         phone,
         name,
         pet_name: petName,

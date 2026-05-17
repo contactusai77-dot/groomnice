@@ -1,11 +1,13 @@
 import os
+import re
 import uuid
 from datetime import date, datetime, time as dt_time, timedelta
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,8 +18,16 @@ from sqlalchemy.orm import Session
 load_dotenv()
 
 from database import Base, engine, get_db
-from models import Booking, Client, GroomerSettings, PetProfile, VaccineSubmission, WaitlistEntry
-from services.sms import send_booking_confirmation, send_booking_request_received, send_gap_notification, send_intake_link, send_vaccine_link, send_vaccine_reminder
+from models import Booking, Client, Groomer, GroomerSettings, PetProfile, VaccineSubmission, WaitlistEntry
+from auth import create_access_token, get_current_groomer, hash_password, verify_password
+from services.sms import (
+    send_booking_confirmation,
+    send_booking_request_received,
+    send_gap_notification,
+    send_intake_link,
+    send_vaccine_link,
+    send_vaccine_reminder,
+)
 from services.vision import extract_vaccine_info
 
 Base.metadata.create_all(bind=engine)
@@ -26,9 +36,10 @@ app = FastAPI(title="Groomer API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:4001")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
 DEFAULT_WORKING_HOURS: dict = {
-    "days": [0, 1, 2, 3, 4],  # Mon–Fri (Python weekday)
+    "days": [0, 1, 2, 3, 4],
     "start": "09:00",
     "end": "17:00",
     "slot_minutes": 60,
@@ -49,6 +60,19 @@ app.mount("/uploads", StaticFiles(directory=str(_UPLOADS)), name="uploads")
 
 
 # ── Schemas ──────────────────────────────────────────────────────────────────
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+    slug: str  # URL-safe business handle, e.g. "sarahs-paws"
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class GoogleAuthRequest(BaseModel):
+    credential: str  # Google ID token
 
 class BookingRequest(BaseModel):
     phone: str
@@ -117,6 +141,10 @@ def normalize_phone(raw: str) -> str:
         return f"+{digits}"
     return f"+{digits}"
 
+def _slug_from(name: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
+    return s or "groomer"
+
 def _vaccine_ok(pet: Optional[PetProfile]) -> bool:
     if not pet or not pet.rabies_expiry:
         return False
@@ -125,20 +153,19 @@ def _vaccine_ok(pet: Optional[PetProfile]) -> bool:
     except ValueError:
         return bool(pet.rabies_expiry)
 
-def _get_settings(db: Session) -> GroomerSettings:
-    s = db.query(GroomerSettings).filter(GroomerSettings.id == 1).first()
+def _get_settings(db: Session, groomer_id: str) -> GroomerSettings:
+    s = db.query(GroomerSettings).filter(GroomerSettings.groomer_id == groomer_id).first()
     if not s:
-        s = GroomerSettings(id=1)
+        s = GroomerSettings(groomer_id=groomer_id)
         db.add(s)
         db.commit()
         db.refresh(s)
     return s
 
-def _find_open_slots_today(db: Session, settings: GroomerSettings) -> list:
+def _find_open_slots_today(db: Session, settings: GroomerSettings, groomer_id: str) -> list:
     wh = settings.working_hours or DEFAULT_WORKING_HOURS
     today = datetime.utcnow().date()
-    today_idx = today.weekday()  # 0=Mon … 6=Sun
-    if today_idx not in wh.get("days", []):
+    if today.weekday() not in wh.get("days", []):
         return []
     start_h, start_m = map(int, wh["start"].split(":"))
     end_h, end_m = map(int, wh["end"].split(":"))
@@ -151,6 +178,7 @@ def _find_open_slots_today(db: Session, settings: GroomerSettings) -> list:
     today_start = datetime.combine(today, dt_time.min)
     tomorrow = today_start + timedelta(days=1)
     bookings = db.query(Booking).filter(
+        Booking.groomer_id == groomer_id,
         Booking.appointment_date >= today_start,
         Booking.appointment_date < tomorrow,
         Booking.status.in_(["confirmed", "in_progress", "pending_review"]),
@@ -159,8 +187,8 @@ def _find_open_slots_today(db: Session, settings: GroomerSettings) -> list:
     open_slots = [s for s in slots if s not in booked]
     return [f"{int(s[:2]) % 12 or 12}:{s[3:]} {'AM' if int(s[:2]) < 12 else 'PM'}" for s in open_slots]
 
-def _get_prices(db: Session) -> dict:
-    s = _get_settings(db)
+def _get_prices(db: Session, groomer_id: str) -> dict:
+    s = _get_settings(db, groomer_id)
     return s.service_prices or DEFAULT_PRICES
 
 def _booking_dict(b, pet=None, c=None) -> dict:
@@ -209,6 +237,85 @@ def health():
     return {"status": "ok"}
 
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/register", status_code=201)
+def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    if db.query(Groomer).filter(Groomer.email == req.email.lower()).first():
+        raise HTTPException(status_code=409, detail="Email already registered")
+    slug = req.slug.lower().strip() or _slug_from(req.name)
+    if db.query(Groomer).filter(Groomer.slug == slug).first():
+        raise HTTPException(status_code=409, detail="Slug already taken — try another")
+    groomer = Groomer(
+        email=req.email.lower(),
+        password_hash=hash_password(req.password),
+        name=req.name,
+        slug=slug,
+    )
+    db.add(groomer)
+    db.flush()
+    db.add(GroomerSettings(groomer_id=groomer.id))
+    db.commit()
+    db.refresh(groomer)
+    token = create_access_token(groomer.id)
+    return {"token": token, "groomer": {"id": groomer.id, "name": groomer.name, "email": groomer.email, "slug": groomer.slug}}
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest, db: Session = Depends(get_db)):
+    groomer = db.query(Groomer).filter(Groomer.email == req.email.lower()).first()
+    if not groomer or not groomer.password_hash or not verify_password(req.password, groomer.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = create_access_token(groomer.id)
+    return {"token": token, "groomer": {"id": groomer.id, "name": groomer.name, "email": groomer.email, "slug": groomer.slug}}
+
+
+@app.post("/api/auth/google")
+async def google_auth(req: GoogleAuthRequest, db: Session = Depends(get_db)):
+    """Verify Google ID token and sign in or register the groomer."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"https://oauth2.googleapis.com/tokeninfo?id_token={req.credential}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+    info = r.json()
+    if GOOGLE_CLIENT_ID and info.get("aud") != GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=401, detail="Token audience mismatch")
+    google_id = info.get("sub")
+    email = info.get("email", "").lower()
+    name = info.get("name") or email.split("@")[0]
+
+    groomer = db.query(Groomer).filter(
+        (Groomer.google_id == google_id) | (Groomer.email == email)
+    ).first()
+    if groomer:
+        if not groomer.google_id:
+            groomer.google_id = google_id
+            db.commit()
+    else:
+        slug = _slug_from(name)
+        base_slug = slug
+        i = 1
+        while db.query(Groomer).filter(Groomer.slug == slug).first():
+            slug = f"{base_slug}-{i}"
+            i += 1
+        groomer = Groomer(email=email, name=name, slug=slug, google_id=google_id)
+        db.add(groomer)
+        db.flush()
+        db.add(GroomerSettings(groomer_id=groomer.id))
+        db.commit()
+        db.refresh(groomer)
+
+    token = create_access_token(groomer.id)
+    return {"token": token, "groomer": {"id": groomer.id, "name": groomer.name, "email": groomer.email, "slug": groomer.slug}}
+
+
+@app.get("/api/auth/me")
+def me(groomer: Groomer = Depends(get_current_groomer)):
+    return {"id": groomer.id, "name": groomer.name, "email": groomer.email, "slug": groomer.slug}
+
+
+# ── Seed ──────────────────────────────────────────────────────────────────────
+
 @app.post("/api/seed")
 def run_seed(key: str = Query(...)):
     if key != os.getenv("SEED_KEY", "dev"):
@@ -221,6 +328,20 @@ def run_seed(key: str = Query(...)):
         today = date.today()
         def appt(h, m): return datetime.combine(today, dt_time(h, m))
 
+        g = Groomer(
+            email="demo@groomnice.com",
+            password_hash=hash_password("demo1234"),
+            name="Demo Groomer",
+            slug="demo",
+        )
+        db.add(g)
+        db.flush()
+        db.add(GroomerSettings(
+            groomer_id=g.id, require_deposit=True, send_24h_reminder=True,
+            send_gap_fill_text=True, deposit_amount=25.0,
+            service_prices=DEFAULT_PRICES, working_hours=DEFAULT_WORKING_HOURS,
+        ))
+
         clients_data = [
             ("Jane Smith",   "+15551110001", "Biscuit", "Golden Retriever", "2026-11-15", True),
             ("Marco Rivera", "+15551110002", "Luna",    "Poodle",           "2025-03-01", True),
@@ -231,7 +352,7 @@ def run_seed(key: str = Query(...)):
         ]
         client_rows, pet_rows = [], []
         for name, phone, pet_name, breed, vaccine_expiry, complete in clients_data:
-            c = Client(id=uuid.uuid4().hex, phone=phone, name=name, intake_token=uuid.uuid4().hex)
+            c = Client(id=uuid.uuid4().hex, groomer_id=g.id, phone=phone, name=name, intake_token=uuid.uuid4().hex)
             db.add(c); db.flush()
             p = PetProfile(id=uuid.uuid4().hex, client_id=c.id, pet_name=pet_name, breed=breed,
                            age="3 years", weight="25 lbs", emergency_contact="+15559990000",
@@ -255,14 +376,14 @@ def run_seed(key: str = Query(...)):
             (5, 14, 30, "Bath & Cut",  "pending_payment", 60.0),
         ]
         for idx, h, m, svc, status, price in today_bookings:
-            db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
+            db.add(Booking(id=uuid.uuid4().hex, groomer_id=g.id,
+                           client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
                            appointment_date=appt(h, m), service_type=svc, status=status,
                            deposit_amount=25.0, price=price))
-        db.add(Booking(id=uuid.uuid4().hex, client_id=jane.id, pet_id=pepper.id,
+        db.add(Booking(id=uuid.uuid4().hex, groomer_id=g.id, client_id=jane.id, pet_id=pepper.id,
                        appointment_date=appt(15, 30), service_type="Bath & Cut", status="confirmed",
                        deposit_amount=25.0, price=60.0))
 
-        # Past bookings across several weeks for history/revenue demo
         for days_ago, idx, h, svc, status, price in [
             (3,  0, 10, "Full Groom",  "completed", 75.0),
             (3,  1, 11, "Bath & Cut",  "completed", 60.0),
@@ -276,47 +397,28 @@ def run_seed(key: str = Query(...)):
             (28, 2, 10, "Bath & Cut",  "completed", 60.0),
         ]:
             past = datetime.combine(today - timedelta(days=days_ago), dt_time(h, 0))
-            db.add(Booking(id=uuid.uuid4().hex, client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
+            db.add(Booking(id=uuid.uuid4().hex, groomer_id=g.id,
+                           client_id=client_rows[idx].id, pet_id=pet_rows[idx].id,
                            appointment_date=past, service_type=svc, status=status,
                            deposit_amount=25.0, price=price))
 
-        db.add(GroomerSettings(id=1, require_deposit=True, send_24h_reminder=True,
-                               send_gap_fill_text=True, deposit_amount=25.0,
-                               service_prices=DEFAULT_PRICES,
-                               working_hours=DEFAULT_WORKING_HOURS))
         db.commit()
-        return {"seeded": True, "date": today.isoformat()}
+        return {"seeded": True, "date": today.isoformat(), "demo_email": "demo@groomnice.com", "demo_password": "demo1234"}
     finally:
         db.close()
-
-
-# ── Customer booking flow ─────────────────────────────────────────────────────
-
-@app.post("/api/bookings")
-async def create_booking(req: BookingRequest, db: Session = Depends(get_db)):
-    phone = normalize_phone(req.phone)
-    client = db.query(Client).filter(Client.phone == phone).first()
-    if not client:
-        client = Client(id=uuid.uuid4().hex, phone=phone, name=req.name, intake_token=uuid.uuid4().hex)
-        db.add(client)
-        db.flush()
-        db.add(PetProfile(id=uuid.uuid4().hex, client_id=client.id))
-
-    booking = Booking(id=uuid.uuid4().hex, client_id=client.id, status="confirmed",
-                      appointment_date=datetime.combine(date.today(), dt_time(9, 0)))
-    db.add(booking)
-    db.commit()
-    return {"booking_id": booking.id, "message": "Booking created"}
 
 
 # ── Groomer dashboard ─────────────────────────────────────────────────────────
 
 @app.get("/api/appointments/today")
-def get_today_appointments(db: Session = Depends(get_db)):
+def get_today_appointments(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
     today = date.today()
     bookings = (
         db.query(Booking)
-        .filter(func.date(Booking.appointment_date) == today)
+        .filter(Booking.groomer_id == groomer.id, func.date(Booking.appointment_date) == today)
         .all()
     )
     result = [_booking_dict(b) for b in bookings]
@@ -324,13 +426,21 @@ def get_today_appointments(db: Session = Depends(get_db)):
 
 
 @app.get("/api/appointments/history")
-def get_history(q: str = Query(""), days: int = Query(60), db: Session = Depends(get_db)):
+def get_history(
+    q: str = Query(""),
+    days: int = Query(60),
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
     since = datetime.combine(date.today() - timedelta(days=days), dt_time(0, 0))
     today_start = datetime.combine(date.today(), dt_time(0, 0))
     bookings = (
         db.query(Booking)
-        .filter(Booking.appointment_date >= since)
-        .filter(Booking.appointment_date < today_start)
+        .filter(
+            Booking.groomer_id == groomer.id,
+            Booking.appointment_date >= since,
+            Booking.appointment_date < today_start,
+        )
         .order_by(Booking.appointment_date.desc())
         .all()
     )
@@ -346,8 +456,11 @@ def get_history(q: str = Query(""), days: int = Query(60), db: Session = Depends
 
 
 @app.get("/api/revenue")
-def get_revenue(db: Session = Depends(get_db)):
-    prices = _get_prices(db)
+def get_revenue(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    prices = _get_prices(db, groomer.id)
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
     month_start = today.replace(day=1)
@@ -355,19 +468,24 @@ def get_revenue(db: Session = Depends(get_db)):
     def revenue_for(start: date):
         bookings = (
             db.query(Booking)
-            .filter(Booking.status == "completed")
-            .filter(func.date(Booking.appointment_date) >= start)
-            .filter(func.date(Booking.appointment_date) <= today)
+            .filter(
+                Booking.groomer_id == groomer.id,
+                Booking.status == "completed",
+                func.date(Booking.appointment_date) >= start,
+                func.date(Booking.appointment_date) <= today,
+            )
             .all()
         )
         total = sum(b.price if b.price is not None else prices.get(b.service_type or "", 0) for b in bookings)
         return {"revenue": round(total, 2), "count": len(bookings)}
 
-    # Revenue by service type (month)
     month_bookings = (
         db.query(Booking)
-        .filter(Booking.status == "completed")
-        .filter(func.date(Booking.appointment_date) >= month_start)
+        .filter(
+            Booking.groomer_id == groomer.id,
+            Booking.status == "completed",
+            func.date(Booking.appointment_date) >= month_start,
+        )
         .all()
     )
     by_service: dict = {}
@@ -388,12 +506,19 @@ def get_revenue(db: Session = Depends(get_db)):
 
 
 @app.post("/api/bookings/quick")
-async def quick_booking(req: QuickBookingRequest, db: Session = Depends(get_db)):
+async def quick_booking(
+    req: QuickBookingRequest,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
     phone = normalize_phone(req.phone)
-    client = db.query(Client).filter(Client.phone == phone).first()
+    client = db.query(Client).filter(
+        Client.groomer_id == groomer.id, Client.phone == phone
+    ).first()
     if not client:
         client = Client(
             id=uuid.uuid4().hex,
+            groomer_id=groomer.id,
             phone=phone,
             name=req.client_name or phone,
             intake_token=uuid.uuid4().hex,
@@ -413,10 +538,11 @@ async def quick_booking(req: QuickBookingRequest, db: Session = Depends(get_db))
         except ValueError:
             pass
 
-    settings = _get_settings(db)
+    settings = _get_settings(db, groomer.id)
     prices = settings.service_prices or DEFAULT_PRICES
     booking = Booking(
         id=uuid.uuid4().hex,
+        groomer_id=groomer.id,
         client_id=client.id,
         service_type=req.service_type,
         appointment_date=appt_dt,
@@ -427,19 +553,47 @@ async def quick_booking(req: QuickBookingRequest, db: Session = Depends(get_db))
     db.flush()
     db.commit()
 
-    # SMS: send intake + vaccine links (no-op when Twilio not configured)
     send_intake_link(client.phone, client.name, client.intake_token)
     send_vaccine_link(client.phone, client.name, client.intake_token)
 
     return {"booking_id": booking.id, "intake_token": client.intake_token}
 
 
-# ── Online booking (customer-facing) ─────────────────────────────────────────
+@app.patch("/api/bookings/{booking_id}/status")
+def update_status(
+    booking_id: str,
+    body: StatusUpdate,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    b = db.query(Booking).filter(Booking.id == booking_id, Booking.groomer_id == groomer.id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Not found")
+    b.status = body.status
+    db.commit()
+    if body.status == "confirmed" and b.client:
+        pet = b.pet or (b.client.pet_profiles[0] if b.client.pet_profiles else None)
+        if not _vaccine_ok(pet):
+            expired = bool(pet and pet.rabies_expiry)
+            send_vaccine_reminder(b.client.phone, b.client.name, b.client.intake_token, expired=expired)
+    if body.status == "cancelled":
+        settings = _get_settings(db, groomer.id)
+        if settings.send_gap_fill_text:
+            open_slots = _find_open_slots_today(db, settings, groomer.id)
+            if open_slots:
+                for entry in db.query(WaitlistEntry).filter(WaitlistEntry.groomer_id == groomer.id).all():
+                    send_gap_notification(entry.phone, entry.name, open_slots)
+    return {"success": True}
 
-@app.get("/api/book/slots")
-def get_booking_slots(db: Session = Depends(get_db)):
-    """Return available time slots for the next 7 days based on working hours."""
-    s = _get_settings(db)
+
+# ── Online booking (public, routed by groomer slug) ───────────────────────────
+
+@app.get("/api/book/{slug}/slots")
+def get_booking_slots(slug: str, db: Session = Depends(get_db)):
+    g = db.query(Groomer).filter(Groomer.slug == slug).first()
+    if not g:
+        raise HTTPException(status_code=404, detail="Groomer not found")
+    s = _get_settings(db, g.id)
     wh = s.working_hours or DEFAULT_WORKING_HOURS
     work_days: list = wh.get("days", [0, 1, 2, 3, 4])
     sh, sm = map(int, wh.get("start", "09:00").split(":"))
@@ -454,9 +608,8 @@ def get_booking_slots(db: Session = Depends(get_db)):
         d = today + timedelta(days=delta)
         if d.weekday() not in work_days:
             continue
-
-        # Existing bookings for this day (any non-declined/canceled status)
         booked = db.query(Booking).filter(
+            Booking.groomer_id == g.id,
             func.date(Booking.appointment_date) == d,
             Booking.status.notin_(["declined", "canceled"]),
         ).all()
@@ -466,7 +619,6 @@ def get_booking_slots(db: Session = Depends(get_db)):
         current = datetime.combine(d, dt_time(sh, sm))
         day_end = datetime.combine(d, dt_time(eh, em))
         while current + timedelta(minutes=slot_min) <= day_end:
-            # For today, only show slots at least 1 hour from now
             if d == today and current <= now + timedelta(hours=1):
                 current += timedelta(minutes=slot_min)
                 continue
@@ -476,22 +628,21 @@ def get_booking_slots(db: Session = Depends(get_db)):
             current += timedelta(minutes=slot_min)
 
         if slots:
-            result.append({
-                "date": d.isoformat(),
-                "day_name": d.strftime("%A"),
-                "slots": slots,
-            })
+            result.append({"date": d.isoformat(), "day_name": d.strftime("%A"), "slots": slots})
 
     return result
 
 
-@app.post("/api/book")
-async def online_booking(req: OnlineBookingRequest, db: Session = Depends(get_db)):
-    """Client-facing booking request — creates a pending_review booking."""
+@app.post("/api/book/{slug}")
+async def online_booking(slug: str, req: OnlineBookingRequest, db: Session = Depends(get_db)):
+    g = db.query(Groomer).filter(Groomer.slug == slug).first()
+    if not g:
+        raise HTTPException(status_code=404, detail="Groomer not found")
+
     phone = normalize_phone(req.phone)
-    client = db.query(Client).filter(Client.phone == phone).first()
+    client = db.query(Client).filter(Client.groomer_id == g.id, Client.phone == phone).first()
     if not client:
-        client = Client(id=uuid.uuid4().hex, phone=phone, name=req.name, intake_token=uuid.uuid4().hex)
+        client = Client(id=uuid.uuid4().hex, groomer_id=g.id, phone=phone, name=req.name, intake_token=uuid.uuid4().hex)
         db.add(client)
         db.flush()
         pet = PetProfile(id=uuid.uuid4().hex, client_id=client.id, pet_name=req.pet_name or None)
@@ -509,10 +660,11 @@ async def online_booking(req: OnlineBookingRequest, db: Session = Depends(get_db
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid slot_date or slot_time")
 
-    settings = _get_settings(db)
+    settings = _get_settings(db, g.id)
     prices = settings.service_prices or DEFAULT_PRICES
     booking = Booking(
         id=uuid.uuid4().hex,
+        groomer_id=g.id,
         client_id=client.id,
         service_type=req.service_type,
         appointment_date=appt_dt,
@@ -523,41 +675,20 @@ async def online_booking(req: OnlineBookingRequest, db: Session = Depends(get_db
     db.add(booking)
     db.commit()
 
-    # SMS stubs (fire-and-forget when Twilio is configured)
     send_booking_request_received(client.phone, client.name)
     send_vaccine_link(client.phone, client.name, client.intake_token)
 
     return {"booking_id": booking.id, "intake_token": client.intake_token, "status": "pending_review"}
 
 
-@app.patch("/api/bookings/{booking_id}/status")
-def update_status(booking_id: str, body: StatusUpdate, db: Session = Depends(get_db)):
-    b = db.query(Booking).filter(Booking.id == booking_id).first()
-    if not b:
-        raise HTTPException(status_code=404, detail="Not found")
-    b.status = body.status
-    db.commit()
-    if body.status == "confirmed" and b.client:
-        pet = b.pet or (b.client.pet_profiles[0] if b.client.pet_profiles else None)
-        if not _vaccine_ok(pet):
-            expired = bool(pet and pet.rabies_expiry)
-            send_vaccine_reminder(b.client.phone, b.client.name, b.client.intake_token, expired=expired)
-    if body.status == "cancelled":
-        settings = _get_settings(db)
-        if settings.send_gap_fill_text:
-            open_slots = _find_open_slots_today(db, settings)
-            if open_slots:
-                for entry in db.query(WaitlistEntry).all():
-                    send_gap_notification(entry.phone, entry.name, open_slots)
-    return {"success": True}
-
-
-
 # ── Clients ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/clients")
-def get_clients(db: Session = Depends(get_db)):
-    clients = db.query(Client).order_by(Client.created_at.desc()).all()
+def get_clients(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    clients = db.query(Client).filter(Client.groomer_id == groomer.id).order_by(Client.created_at.desc()).all()
     result = []
     for c in clients:
         last = (
@@ -578,11 +709,14 @@ def get_clients(db: Session = Depends(get_db)):
     return result
 
 
-# ── Client / pet edit (groomer-facing) ───────────────────────────────────────
-
 @app.patch("/api/clients/{client_id}")
-def update_client(client_id: str, body: ClientUpdate, db: Session = Depends(get_db)):
-    c = db.query(Client).filter(Client.id == client_id).first()
+def update_client(
+    client_id: str,
+    body: ClientUpdate,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    c = db.query(Client).filter(Client.id == client_id, Client.groomer_id == groomer.id).first()
     if not c:
         raise HTTPException(status_code=404, detail="Not found")
     c.name = body.name
@@ -592,8 +726,18 @@ def update_client(client_id: str, body: ClientUpdate, db: Session = Depends(get_
 
 
 @app.patch("/api/pets/{pet_id}")
-def update_pet_groomer(pet_id: str, data: PetUpdate, db: Session = Depends(get_db)):
-    pet = db.query(PetProfile).filter(PetProfile.id == pet_id).first()
+def update_pet_groomer(
+    pet_id: str,
+    data: PetUpdate,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    pet = (
+        db.query(PetProfile)
+        .join(Client)
+        .filter(PetProfile.id == pet_id, Client.groomer_id == groomer.id)
+        .first()
+    )
     if not pet:
         raise HTTPException(status_code=404, detail="Not found")
     for field in ("pet_name", "breed", "age", "weight", "notes"):
@@ -602,22 +746,18 @@ def update_pet_groomer(pet_id: str, data: PetUpdate, db: Session = Depends(get_d
     return {"success": True}
 
 
-# ── Pet profile (customer-facing) ─────────────────────────────────────────────
+# ── Pet profile (customer-facing, token-gated) ────────────────────────────────
 
 @app.get("/api/profile/{token}")
 def get_profile(token: str, db: Session = Depends(get_db)):
     c = db.query(Client).filter(Client.intake_token == token).first()
     if not c:
         raise HTTPException(status_code=404, detail="Profile not found")
-    return {
-        "client_name": c.name,
-        "pets": [_pet_dict(p) for p in c.pet_profiles],
-    }
+    return {"client_name": c.name, "pets": [_pet_dict(p) for p in c.pet_profiles]}
 
 
 @app.put("/api/profile/{token}")
 def update_profile(token: str, data: ProfileUpdate, db: Session = Depends(get_db)):
-    """Backward-compat: edits the first pet (or creates one)."""
     c = db.query(Client).filter(Client.intake_token == token).first()
     if not c:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -686,7 +826,6 @@ async def upload_vaccine(
 
     image_bytes = await file.read()
     media_type = file.content_type or "image/jpeg"
-
     ext = (file.filename or "cert.jpg").rsplit(".", 1)[-1]
     filename = f"{uuid.uuid4().hex}.{ext}"
     (_UPLOADS / filename).write_bytes(image_bytes)
@@ -713,17 +852,20 @@ async def upload_vaccine(
 
     if result.get("needs_review"):
         return {"rabies_expiry": None, "needs_review": True, "message": "Image unclear — please retake"}
-
     return {"rabies_expiry": result.get("rabies_expiry"), "needs_review": False, "message": "Certificate saved"}
 
 
 # ── Vaccine vault (groomer-facing) ────────────────────────────────────────────
 
 @app.get("/api/vaccine-vault")
-def get_vault(db: Session = Depends(get_db)):
+def get_vault(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
     submissions = (
         db.query(VaccineSubmission)
-        .filter(VaccineSubmission.status == "pending")
+        .join(Client)
+        .filter(Client.groomer_id == groomer.id, VaccineSubmission.status == "pending")
         .order_by(VaccineSubmission.created_at.desc())
         .all()
     )
@@ -744,17 +886,23 @@ def get_vault(db: Session = Depends(get_db)):
 
 
 @app.patch("/api/vaccine-vault/{submission_id}/confirm")
-def confirm_vaccine(submission_id: str, body: VaccineConfirmBody, db: Session = Depends(get_db)):
-    s = db.query(VaccineSubmission).filter(VaccineSubmission.id == submission_id).first()
+def confirm_vaccine(
+    submission_id: str,
+    body: VaccineConfirmBody,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    s = (
+        db.query(VaccineSubmission)
+        .join(Client)
+        .filter(VaccineSubmission.id == submission_id, Client.groomer_id == groomer.id)
+        .first()
+    )
     if not s:
         raise HTTPException(status_code=404, detail="Not found")
     s.confirmed_expiry = body.expiry
     s.status = "confirmed"
-    target_pet = s.pet
-    if not target_pet:
-        c = s.client
-        if c and c.pet_profiles:
-            target_pet = c.pet_profiles[0]
+    target_pet = s.pet or (s.client.pet_profiles[0] if s.client and s.client.pet_profiles else None)
     if target_pet:
         target_pet.rabies_expiry = body.expiry
     db.commit()
@@ -764,8 +912,11 @@ def confirm_vaccine(submission_id: str, body: VaccineConfirmBody, db: Session = 
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/settings")
-def get_settings(db: Session = Depends(get_db)):
-    s = _get_settings(db)
+def get_settings(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    s = _get_settings(db, groomer.id)
     return {
         "require_deposit": s.require_deposit,
         "send_24h_reminder": s.send_24h_reminder,
@@ -777,33 +928,53 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @app.patch("/api/settings")
-def update_settings(body: SettingsUpdate, db: Session = Depends(get_db)):
-    s = _get_settings(db)
+def update_settings(
+    body: SettingsUpdate,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    s = _get_settings(db, groomer.id)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(s, field, value)
     db.commit()
     return {"success": True}
 
 
-
 # ── Waitlist ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/waitlist")
-def get_waitlist(db: Session = Depends(get_db)):
-    entries = db.query(WaitlistEntry).order_by(WaitlistEntry.created_at.asc()).all()
+def get_waitlist(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    entries = db.query(WaitlistEntry).filter(
+        WaitlistEntry.groomer_id == groomer.id
+    ).order_by(WaitlistEntry.created_at.asc()).all()
     return [{"id": e.id, "phone": e.phone, "name": e.name} for e in entries]
 
+
 @app.post("/api/waitlist")
-def add_waitlist(body: WaitlistAdd, db: Session = Depends(get_db)):
-    entry = WaitlistEntry(phone=body.phone, name=body.name)
+def add_waitlist(
+    body: WaitlistAdd,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    entry = WaitlistEntry(groomer_id=groomer.id, phone=body.phone, name=body.name)
     db.add(entry)
     db.commit()
     db.refresh(entry)
     return {"id": entry.id, "phone": entry.phone, "name": entry.name}
 
+
 @app.delete("/api/waitlist/{entry_id}")
-def remove_waitlist(entry_id: str, db: Session = Depends(get_db)):
-    entry = db.query(WaitlistEntry).filter(WaitlistEntry.id == entry_id).first()
+def remove_waitlist(
+    entry_id: str,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    entry = db.query(WaitlistEntry).filter(
+        WaitlistEntry.id == entry_id, WaitlistEntry.groomer_id == groomer.id
+    ).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Not found")
     db.delete(entry)

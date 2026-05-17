@@ -1,13 +1,35 @@
+function getToken(): string | null {
+  return localStorage.getItem("groomnice_token");
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string>),
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`/api${path}`, { ...options, headers });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
   }
   return res.json();
+}
+
+// ── Auth types ────────────────────────────────────────────────────────────────
+
+export interface GroomerInfo {
+  id: string;
+  name: string;
+  email: string;
+  slug: string;
+}
+
+export interface AuthResult {
+  token: string;
+  groomer: GroomerInfo;
 }
 
 // ── Customer-facing types ─────────────────────────────────────────────────────
@@ -92,9 +114,9 @@ export interface ClientData {
 }
 
 export interface WorkingHours {
-  days: number[];       // 0=Mon … 6=Sun
-  start: string;        // "HH:MM"
-  end: string;          // "HH:MM"
+  days: number[];
+  start: string;
+  end: string;
   slot_minutes: number;
 }
 
@@ -134,6 +156,27 @@ export interface VaultSubmission {
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export const api = {
+  // Auth
+  register: (email: string, password: string, name: string, slug: string) =>
+    request<AuthResult>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ email, password, name, slug }),
+    }),
+
+  login: (email: string, password: string) =>
+    request<AuthResult>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+
+  googleAuth: (credential: string) =>
+    request<AuthResult>("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ credential }),
+    }),
+
+  getMe: () => request<GroomerInfo>("/auth/me"),
+
   // Customer
   createBooking: (phone: string, name: string) =>
     request<BookingResponse>("/bookings", { method: "POST", body: JSON.stringify({ phone, name }) }),
@@ -196,17 +239,20 @@ export const api = {
 
   getRevenue: () => request<RevenueData>("/revenue"),
 
-  // Online booking (customer-facing)
-  getBookingSlots: () => request<BookingSlot[]>("/book/slots"),
+  // Online booking (customer-facing, keyed by groomer slug)
+  getBookingSlots: (slug: string) => request<BookingSlot[]>(`/book/${slug}/slots`),
 
-  onlineBook: (data: {
-    phone: string;
-    name: string;
-    pet_name: string;
-    service_type: string;
-    slot_date: string;
-    slot_time: string;
-  }) => request<OnlineBookingResult>("/book", { method: "POST", body: JSON.stringify(data) }),
+  onlineBook: (
+    slug: string,
+    data: {
+      phone: string;
+      name: string;
+      pet_name: string;
+      service_type: string;
+      slot_date: string;
+      slot_time: string;
+    },
+  ) => request<OnlineBookingResult>(`/book/${slug}`, { method: "POST", body: JSON.stringify(data) }),
 
   // Settings
   getSettings: () => request<SettingsData>("/settings"),
