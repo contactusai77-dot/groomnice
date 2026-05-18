@@ -926,7 +926,8 @@ def get_vault(
     submissions = (
         db.query(VaccineSubmission)
         .join(Client)
-        .filter(Client.groomer_id == groomer.id, VaccineSubmission.status == "pending")
+        .filter(Client.groomer_id == groomer.id,
+                VaccineSubmission.status.in_(["pending", "needs_retake"]))
         .order_by(VaccineSubmission.created_at.desc())
         .all()
     )
