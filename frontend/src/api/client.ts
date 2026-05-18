@@ -315,4 +315,28 @@ export const api = {
 
   submitFeedback: (data: { email: string; type: string; message: string }) =>
     request<{ success: boolean }>("/feedback", { method: "POST", body: JSON.stringify(data) }),
+
+  importPreview: async (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const token = localStorage.getItem("groomnice_token");
+    const res = await fetch("/api/import/preview", {
+      method: "POST",
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json() as Promise<{
+      columns: string[];
+      total_rows: number;
+      sample_rows: Record<string, string>[];
+      suggested_mapping: Record<string, string>;
+    }>;
+  },
+
+  importApply: (rows: Record<string, string>[], mapping: Record<string, string>) =>
+    request<{ imported: number; skipped: number }>("/import/apply", {
+      method: "POST",
+      body: JSON.stringify({ rows, mapping }),
+    }),
 };

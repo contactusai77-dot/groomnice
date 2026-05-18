@@ -33,6 +33,7 @@ from services.sms import (
 )
 from services.vision import extract_vaccine_info
 from services.pricing import estimate_price
+from services.importer import parse_csv, suggest_mapping, normalize_phone_safe
 
 Base.metadata.create_all(bind=engine)
 
@@ -149,6 +150,10 @@ class FeedbackCreate(BaseModel):
     email: str = ""
     type: str = "general"
     message: str
+
+class ImportApplyRequest(BaseModel):
+    rows: list[dict]
+    mapping: dict[str, str]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1082,6 +1087,87 @@ async def get_route_today(
                         pass
 
     return {"stops": stops, "has_locations": len(geo_stops) > 0, "geo_count": len(geo_stops)}
+
+
+# ── CSV import ────────────────────────────────────────────────────────────────
+
+@app.post("/api/import/preview")
+async def import_preview(
+    file: UploadFile = File(...),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    raw = (await file.read()).decode("utf-8-sig")  # strip Excel BOM
+    try:
+        columns, rows = parse_csv(raw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+    if not columns:
+        raise HTTPException(status_code=400, detail="CSV has no headers")
+    return {
+        "columns": columns,
+        "total_rows": len(rows),
+        "sample_rows": rows[:3],
+        "suggested_mapping": suggest_mapping(columns),
+    }
+
+
+@app.post("/api/import/apply")
+def import_apply(
+    body: ImportApplyRequest,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    imported = skipped = 0
+    rev_map = {field: col for col, field in body.mapping.items()}
+
+    def get(field: str, row: dict) -> str:
+        col = rev_map.get(field)
+        return row.get(col, "").strip() if col else ""
+
+    for row in body.rows:
+        phone_raw = get("client_phone", row)
+        if not phone_raw:
+            skipped += 1
+            continue
+        phone = normalize_phone_safe(phone_raw)
+        if not phone:
+            skipped += 1
+            continue
+
+        name = get("client_name", row) or "Unknown"
+        client = db.query(Client).filter(
+            Client.groomer_id == groomer.id, Client.phone == phone
+        ).first()
+        if not client:
+            client = Client(
+                id=uuid.uuid4().hex,
+                groomer_id=groomer.id,
+                phone=phone,
+                name=name,
+                intake_token=uuid.uuid4().hex,
+            )
+            db.add(client)
+            db.flush()
+        else:
+            # Update name if we have one and they don't
+            if name and name != "Unknown" and client.name in ("Unknown", ""):
+                client.name = name
+
+        pet_name = get("pet_name", row)
+        if pet_name and not client.pet_profiles:
+            db.add(PetProfile(
+                id=uuid.uuid4().hex,
+                client_id=client.id,
+                pet_name=pet_name,
+                breed=get("breed", row) or None,
+                rabies_expiry=get("rabies_expiry", row) or None,
+                notes=get("notes", row) or None,
+            ))
+
+        imported += 1
+
+    db.commit()
+    return {"imported": imported, "skipped": skipped}
 
 
 # ── Feedback (public) ─────────────────────────────────────────────────────────
