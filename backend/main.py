@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, st
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -99,8 +99,20 @@ class ProfileUpdate(BaseModel):
     emergency_contact: str = ""
     notes: str = ""
 
+_VALID_STATUSES = {
+    "pending_payment", "confirmed", "in_progress", "completed",
+    "cancelled", "declined", "pending_review",
+}
+
 class StatusUpdate(BaseModel):
     status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in _VALID_STATUSES:
+            raise ValueError(f"Invalid status '{v}'. Must be one of: {sorted(_VALID_STATUSES)}")
+        return v
 
 class VaccineConfirmBody(BaseModel):
     expiry: str
@@ -586,8 +598,12 @@ async def quick_booking(
     appt_dt = datetime.combine(date.today(), dt_time(9, 0))
     if req.appointment_time:
         try:
-            h, m = map(int, req.appointment_time.split(":"))
-            appt_dt = datetime.combine(date.today(), dt_time(h, m))
+            # Accept ISO datetime ("2026-05-19T10:00:00") or time-only ("10:00")
+            if "T" in req.appointment_time:
+                appt_dt = datetime.fromisoformat(req.appointment_time)
+            else:
+                h, m = map(int, req.appointment_time.split(":"))
+                appt_dt = datetime.combine(date.today(), dt_time(h, m))
         except ValueError:
             pass
 
@@ -712,6 +728,15 @@ async def online_booking(slug: str, req: OnlineBookingRequest, db: Session = Dep
         appt_dt = datetime.combine(d, dt_time(h, m))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid slot_date or slot_time")
+
+    # Reject if this exact slot is already taken
+    conflict = db.query(Booking).filter(
+        Booking.groomer_id == g.id,
+        Booking.appointment_date == appt_dt,
+        Booking.status.notin_(["declined", "canceled", "cancelled"]),
+    ).first()
+    if conflict:
+        raise HTTPException(status_code=409, detail="That slot is no longer available")
 
     settings = _get_settings(db, g.id)
     prices = settings.service_prices or DEFAULT_PRICES
