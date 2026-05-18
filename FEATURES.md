@@ -23,30 +23,35 @@
 - Daily appointment list sorted by time
 - Per-card info: time, service type, pet name, breed, owner name
 - Vaccine status badge per card: **Ready**, **No Vaccine**, **No Deposit**, **Grooming**, **Done**
+- **Temperament indicator**: 🟢 Friendly / 🟡 Anxious / 🔴 Aggressive shown on each card
 - **Online booking badge**: cards from client self-booking are labeled "Online"
 - **Start / Done** button to move appointment through grooming workflow
 - **Text** button opens SMS to client with pre-filled reminder message
+- **Request Vaccine** button (amber, shown when vaccine missing): opens native share sheet with a pre-written message and the client's vaccine upload link — no Twilio needed
 - **Mark Paid** button for unpaid/deposit-pending appointments
 - **Pending Requests** section: online booking requests appear at top with **Confirm** and **Decline** buttons
 - Revenue earned today shown in header (completed appointments only)
 - Floating **+** button to create same-day appointments
-- **List / Calendar view toggle**: switch between appointment list and a day-view time grid
-  - Calendar view shows every working-hours slot as a row
-  - Booked slots display pet name, service, status dot
-  - Open slots display as green "Available" — tap any to open quick-book drawer with time pre-filled
+- **List / Calendar / Route view toggle**:
+  - List: standard appointment cards
+  - Calendar: day-view time grid — booked slots show pet/service/status, open slots show "Available" (tap to quick-book)
+  - Route *(mobile groomers only)*: nearest-neighbour sorted stop list with Mapbox drive times between stops, "Open in Maps" button per stop
 
 ### New Appointment Drawer (groomer-created)
-- Quick-book form: phone, client name, pet name, service, time
+- Quick-book form: phone, client name, pet name, service, time, breed, coat condition, temperament
 - Looks up existing client by phone — creates new client if not found
+- **AI Price Estimate** button: sends breed + service + temperament + coat condition to Claude Haiku → returns suggested price, estimated duration, and a grooming note
 - On success: shows two copy buttons — **Profile Link** (intake form) and **Vaccine Link** (upload cert)
-- Groomer texts links manually from their own phone
+- Groomer shares links via native share sheet (Web Share API) or clipboard copy
 
 ### Clients Tab
 - Full client list with last visit and vaccine status icon per client
 - Search by client name or pet name (live filter)
 - Tap any client to open edit drawer
-- Edit drawer: update client name, phone, and all pet names/details
+- Edit drawer: update client name, phone, address, and all pet details per pet
+- Per-pet fields: name, breed, age, weight, temperament (🟢/🟡/🔴), notes, **rabies expiry** (date picker)
 - Multi-pet support: one client can have multiple pets
+- Temperament shown as colour-coded dot on every appointment card
 
 ### Reports Tab
 - Revenue cards: **Today**, **This Week**, **This Month**
@@ -68,6 +73,26 @@
   - Send 24-hour reminder text
   - Send "Fill My Gap" text on cancellation
 - **Gap Fill Waitlist**: add/remove clients (name + phone) who get auto-texted when a slot opens due to cancellation
+
+---
+
+## Onboarding Wizard (`/onboarding`)
+
+- Redirected here automatically on first login (`onboarding_complete = false`)
+- **Step 1 — Business type**: Mobile 🚐 or Salon 🏠 (controls Route view visibility)
+- **Step 2 — Client import**: drag-drop or file-pick any CSV export from MoeGo, DaySmart, Square, etc.
+  - Auto-maps columns via fuzzy alias matching (e.g. "Owner Name" → Client Name, "Cell" → Phone)
+  - Preview table shows first 3 rows + column mapping dropdowns for manual correction
+  - Validates that a Phone column is mapped before allowing import
+  - Bulk upserts clients + pets by phone number (deduplicates existing records)
+  - Normalises rabies expiry dates from 10+ formats (MM/DD/YY, Apr 2027, 04/2027, etc.)
+  - After import: shows summary (imported / skipped / issues) with a collapsible issues panel
+    - Issues grouped by type: empty phone (skipped), unreadable phone (skipped), missing name (saved as Unknown), unreadable date (expiry cleared), duplicate phone (last row wins)
+    - Each entry shows row number, raw value, and plain-English description of what happened
+  - "Skip" option available — clients can be added manually later
+- **Step 3 — Working hours**: working days toggle, open/close time, slot duration
+- **Step 4 — Service prices**: edit default prices per service type
+- **Step 5 — Launch pad**: booking URL display, Web Share button, setup checklist, Go to Dashboard
 
 ---
 
@@ -107,6 +132,8 @@
 
 ## Backend & Infrastructure
 
+- **PWA**: installable on iOS/Android (manifest.json, SVG icon, apple-mobile-web-app tags, viewport-fit=cover, safe-area CSS)
+- **Feedback page** (`/feedback`): public, no login — groomers or clients submit bug/feature/general feedback; stored in DB; readable at `GET /api/admin/feedback`
 - **FastAPI** + **SQLAlchemy** backend (SQLite local, Postgres on Railway)
 - **JWT auth**: python-jose + passlib[bcrypt] (bcrypt pinned to 4.0.1 for compatibility)
 - **Google OAuth**: ID token verified via Google's tokeninfo endpoint (no server-side SDK needed)
@@ -127,6 +154,7 @@ ANTHROPIC_API_KEY
 JWT_SECRET          (strong random string)
 ADMIN_KEY           (strong random string)
 SEED_KEY            groomnice2026
+MAPBOX_TOKEN        (for address geocoding + route drive times)
 TWILIO_ACCOUNT_SID  (when SMS is activated)
 TWILIO_AUTH_TOKEN
 TWILIO_PHONE_NUMBER
