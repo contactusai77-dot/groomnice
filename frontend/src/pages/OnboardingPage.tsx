@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { ImportIssue, ImportResult, api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -36,7 +36,8 @@ export default function OnboardingPage() {
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importState, setImportState] = useState<ImportState | null>(null);
-  const [importResult, setImportResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [showIssues, setShowIssues] = useState(false);
   const [importError, setImportError] = useState("");
   const [applying, setApplying] = useState(false);
 
@@ -80,21 +81,19 @@ export default function OnboardingPage() {
 
   async function handleApply() {
     if (!importState) return;
+    const phonesMapped = Object.values(importState.mapping).includes("client_phone");
+    if (!phonesMapped) {
+      setImportError("Please map a column to 'Phone' — it's required to identify each client.");
+      return;
+    }
     setApplying(true);
     setImportError("");
     try {
-      // Re-parse the full file through preview to get all rows, then apply
       const file = (window as any).__importFile as File | undefined;
       if (!file) throw new Error("File reference lost — please re-upload");
-      const full = await api.importPreview(file);
-      const result = await api.importApply(full.sample_rows, importState.mapping);
-      // For real apply we need all rows — importPreview only returns 3 for display.
-      // We actually use a separate apply endpoint that gets full data:
-      const fullResult = await api.importApply(
-        await parseAllRows(file),
-        importState.mapping,
-      );
-      setImportResult(fullResult);
+      const rows = await parseAllRows(file);
+      const result = await api.importApply(rows, importState.mapping);
+      setImportResult(result);
     } catch (e) {
       setImportError(e instanceof Error ? e.message : "Import failed");
     } finally {
@@ -260,13 +259,32 @@ export default function OnboardingPage() {
 
             {importResult && (
               <>
-                <div className="text-center py-4">
-                  <div className="text-4xl mb-3">🎉</div>
-                  <p className="font-bold text-gray-800 text-lg">{importResult.imported} clients imported!</p>
-                  {importResult.skipped > 0 && (
-                    <p className="text-xs text-gray-400 mt-1">{importResult.skipped} rows skipped (missing phone number)</p>
-                  )}
+                <div className="text-center py-3">
+                  <div className="text-3xl mb-2">✅</div>
+                  <p className="font-bold text-gray-800 text-lg">{importResult.imported} clients imported</p>
+                  <div className="flex justify-center gap-3 mt-1 text-xs text-gray-400 flex-wrap">
+                    {importResult.skipped > 0 && <span className="text-red-400">{importResult.skipped} skipped</span>}
+                    {importResult.issues.length > 0 && (
+                      <span className="text-amber-500">{importResult.issues.length} issues</span>
+                    )}
+                  </div>
                 </div>
+
+                {importResult.issues.length > 0 && (
+                  <div className="mb-4">
+                    <button
+                      onClick={() => setShowIssues(v => !v)}
+                      className="w-full flex items-center justify-between px-4 py-2.5 bg-amber-50 border border-amber-100 rounded-xl text-xs font-semibold text-amber-700"
+                    >
+                      <span>⚠️ View {importResult.issues.length} issues</span>
+                      <span>{showIssues ? "▲" : "▼"}</span>
+                    </button>
+                    {showIssues && (
+                      <IssuesPanel issues={importResult.issues} />
+                    )}
+                  </div>
+                )}
+
                 <button onClick={() => setStep(3)} className={btn("violet")}>Next →</button>
               </>
             )}
@@ -388,13 +406,85 @@ export default function OnboardingPage() {
 
 async function parseAllRows(file: File): Promise<Record<string, string>[]> {
   const text = await file.text();
-  const lines = text.split("\n").filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
-  return lines.slice(1).map(line => {
-    const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
-    return Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? ""]));
-  });
+  const rows = parseCSV(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0];
+  return rows.slice(1).map(vals =>
+    Object.fromEntries(headers.map((h, i) => [h, vals[i] ?? ""]))
+  );
+}
+
+function parseCSV(text: string): string[][] {
+  const result: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuote = false;
+  const t = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  for (let i = 0; i < t.length; i++) {
+    const ch = t[i];
+    if (inQuote) {
+      if (ch === '"' && t[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') { inQuote = false; }
+      else { cell += ch; }
+    } else if (ch === '"') {
+      inQuote = true;
+    } else if (ch === ',') {
+      row.push(cell.trim()); cell = "";
+    } else if (ch === '\n') {
+      row.push(cell.trim());
+      if (row.some(c => c !== "")) result.push(row);
+      row = []; cell = "";
+    } else {
+      cell += ch;
+    }
+  }
+  row.push(cell.trim());
+  if (row.some(c => c !== "")) result.push(row);
+  return result;
+}
+
+const ISSUE_META: Record<string, { label: string; color: string }> = {
+  no_phone:        { label: "Empty phone — skipped",      color: "text-red-600" },
+  bad_phone:       { label: "Unreadable phone — skipped", color: "text-red-600" },
+  missing_name:    { label: "Missing name — saved as Unknown", color: "text-amber-600" },
+  bad_date:        { label: "Unreadable date — expiry cleared", color: "text-amber-600" },
+  duplicate_phone: { label: "Duplicate phone",            color: "text-amber-600" },
+};
+
+function IssuesPanel({ issues }: { issues: ImportIssue[] }) {
+  const grouped = issues.reduce<Record<string, ImportIssue[]>>((acc, issue) => {
+    (acc[issue.type] ??= []).push(issue);
+    return acc;
+  }, {});
+
+  return (
+    <div className="mt-2 border border-amber-100 rounded-xl overflow-hidden">
+      {Object.entries(grouped).map(([type, items]) => {
+        const meta = ISSUE_META[type] ?? { label: type, color: "text-gray-600" };
+        return (
+          <div key={type} className="border-b border-amber-50 last:border-0">
+            <p className={`px-3 py-1.5 text-xs font-semibold bg-amber-50 ${meta.color}`}>
+              {meta.label} ({items.length})
+            </p>
+            <ul className="divide-y divide-gray-50 max-h-40 overflow-y-auto">
+              {items.slice(0, 20).map((issue, i) => (
+                <li key={i} className="px-3 py-2">
+                  <span className="text-xs text-gray-400 mr-2">Row {issue.row}</span>
+                  {issue.value && (
+                    <span className="text-xs font-mono bg-gray-100 rounded px-1 mr-2">{issue.value}</span>
+                  )}
+                  <span className="text-xs text-gray-500">{issue.detail}</span>
+                </li>
+              ))}
+              {items.length > 20 && (
+                <li className="px-3 py-2 text-xs text-gray-400">…and {items.length - 20} more</li>
+              )}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function TypeCard({ emoji, title, sub, active, onClick }: {

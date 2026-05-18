@@ -177,6 +177,20 @@ export interface RevenueData {
   by_service: Record<string, RevenuePeriod>;
 }
 
+export interface ImportIssue {
+  row: number;
+  type: "no_phone" | "bad_phone" | "missing_name" | "bad_date" | "duplicate_phone";
+  field: string;
+  value: string;
+  detail: string;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  issues: ImportIssue[];
+}
+
 export interface VaultSubmission {
   id: string;
   client_name: string;
@@ -305,7 +319,7 @@ export const api = {
   updateClient: (id: string, data: { name: string; phone: string; address?: string }) =>
     request<{ success: boolean }>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
 
-  updatePetGroomer: (petId: string, data: { pet_name: string; breed: string; age: string; weight: string; notes: string; temperament: string }) =>
+  updatePetGroomer: (petId: string, data: { pet_name: string; breed: string; age: string; weight: string; notes: string; temperament: string; rabies_expiry: string }) =>
     request<{ success: boolean }>(`/pets/${petId}`, { method: "PATCH", body: JSON.stringify(data) }),
 
   priceEstimate: (data: { breed: string; service_type: string; temperament: string; coat_condition: string }) =>
@@ -335,7 +349,7 @@ export const api = {
   },
 
   importApply: (rows: Record<string, string>[], mapping: Record<string, string>) =>
-    request<{ imported: number; skipped: number }>("/import/apply", {
+    request<ImportResult>("/import/apply", {
       method: "POST",
       body: JSON.stringify({ rows, mapping }),
     }),

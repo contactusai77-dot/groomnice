@@ -145,6 +145,7 @@ function ClientDrawer({ client, onClose, onSaved }: {
           weight: pet.weight ?? "",
           notes: pet.notes ?? "",
           temperament: pet.temperament ?? "friendly",
+          rabies_expiry: pet.rabies_expiry ?? "",
         });
       }
       onSaved();
@@ -216,6 +217,14 @@ function ClientDrawer({ client, onClose, onSaved }: {
                       <option value="anxious">🟡 Anxious — needs extra time</option>
                       <option value="aggressive">🔴 Aggressive — muzzle required</option>
                     </select>
+                  </Field>
+                  <Field label="Rabies expiry">
+                    <input
+                      type="date"
+                      value={pet.rabies_expiry ?? ""}
+                      onChange={e => updatePet(pet.id, "rabies_expiry", e.target.value)}
+                      className={inp}
+                    />
                   </Field>
                 </div>
               ))}

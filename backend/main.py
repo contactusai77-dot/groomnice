@@ -33,7 +33,7 @@ from services.sms import (
 )
 from services.vision import extract_vaccine_info
 from services.pricing import estimate_price
-from services.importer import parse_csv, suggest_mapping, normalize_phone_safe
+from services.importer import parse_csv, suggest_mapping, normalize_phone_safe, normalize_date
 
 Base.metadata.create_all(bind=engine)
 
@@ -139,6 +139,7 @@ class PetUpdate(BaseModel):
     weight: str = ""
     notes: str = ""
     temperament: str = "friendly"
+    rabies_expiry: str = ""
 
 class PriceEstimateRequest(BaseModel):
     breed: str = ""
@@ -801,6 +802,7 @@ def update_pet_groomer(
         raise HTTPException(status_code=404, detail="Not found")
     for field in ("pet_name", "breed", "age", "weight", "notes", "temperament"):
         setattr(pet, field, getattr(data, field))
+    pet.rabies_expiry = data.rabies_expiry.strip() or None
     db.commit()
     return {"success": True}
 
@@ -1117,24 +1119,52 @@ def import_apply(
     db: Session = Depends(get_db),
     groomer: Groomer = Depends(get_current_groomer),
 ):
+    if "client_phone" not in body.mapping.values():
+        raise HTTPException(
+            status_code=400,
+            detail="No column is mapped to Phone. Please assign a phone column before importing.",
+        )
+
     imported = skipped = 0
+    issues: list[dict] = []
+    seen_phones: dict[str, int] = {}  # normalized phone → first CSV row number (2-based)
     rev_map = {field: col for col, field in body.mapping.items()}
 
     def get(field: str, row: dict) -> str:
         col = rev_map.get(field)
         return row.get(col, "").strip() if col else ""
 
-    for row in body.rows:
+    for idx, row in enumerate(body.rows):
+        row_num = idx + 2  # row 1 = header
+
         phone_raw = get("client_phone", row)
         if not phone_raw:
             skipped += 1
+            issues.append({"row": row_num, "type": "no_phone", "field": "client_phone",
+                           "value": "", "detail": "Phone cell is empty — row skipped"})
             continue
+
         phone = normalize_phone_safe(phone_raw)
         if not phone:
             skipped += 1
+            issues.append({"row": row_num, "type": "bad_phone", "field": "client_phone",
+                           "value": phone_raw,
+                           "detail": f"'{phone_raw}' couldn't be parsed as a phone number — row skipped"})
             continue
 
-        name = get("client_name", row) or "Unknown"
+        if phone in seen_phones:
+            issues.append({"row": row_num, "type": "duplicate_phone", "field": "client_phone",
+                           "value": phone_raw,
+                           "detail": f"Same number as row {seen_phones[phone]} — this row's data will overwrite"})
+        else:
+            seen_phones[phone] = row_num
+
+        name = get("client_name", row)
+        if not name:
+            name = "Unknown"
+            issues.append({"row": row_num, "type": "missing_name", "field": "client_name",
+                           "value": "", "detail": "Name was blank — saved as 'Unknown', update in Clients tab"})
+
         client = db.query(Client).filter(
             Client.groomer_id == groomer.id, Client.phone == phone
         ).first()
@@ -1149,25 +1179,34 @@ def import_apply(
             db.add(client)
             db.flush()
         else:
-            # Update name if we have one and they don't
             if name and name != "Unknown" and client.name in ("Unknown", ""):
                 client.name = name
 
         pet_name = get("pet_name", row)
+
+        rabies_raw = get("rabies_expiry", row)
+        rabies_normalized: str | None = None
+        if rabies_raw:
+            rabies_normalized = normalize_date(rabies_raw)
+            if rabies_normalized is None:
+                issues.append({"row": row_num, "type": "bad_date", "field": "rabies_expiry",
+                               "value": rabies_raw,
+                               "detail": f"'{rabies_raw}' is not a recognized date — expiry left blank"})
+
         if pet_name and not client.pet_profiles:
             db.add(PetProfile(
                 id=uuid.uuid4().hex,
                 client_id=client.id,
                 pet_name=pet_name,
                 breed=get("breed", row) or None,
-                rabies_expiry=get("rabies_expiry", row) or None,
+                rabies_expiry=rabies_normalized,
                 notes=get("notes", row) or None,
             ))
 
         imported += 1
 
     db.commit()
-    return {"imported": imported, "skipped": skipped}
+    return {"imported": imported, "skipped": skipped, "issues": issues}
 
 
 # ── Feedback (public) ─────────────────────────────────────────────────────────
