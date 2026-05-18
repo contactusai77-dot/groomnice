@@ -86,7 +86,7 @@ export default function DayView() {
   return (
     <div className="min-h-screen bg-gray-50 pb-28">
       {/* Header */}
-      <div className="bg-white px-5 pt-14 pb-4 border-b border-gray-100">
+      <div className="bg-white px-5 safe-top pb-4 border-b border-gray-100">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <Scissors size={16} className="text-violet-500" />

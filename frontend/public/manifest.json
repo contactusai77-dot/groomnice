@@ -1,0 +1,17 @@
+{
+  "name": "Groomnice",
+  "short_name": "Groomnice",
+  "description": "Pet grooming dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#7c3aed",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Today",   "url": "/",        "description": "Today's appointments" },
+    { "name": "Clients", "url": "/clients", "description": "Client list" }
+  ]
+}

@@ -18,7 +18,7 @@ export default function ReportsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 pb-28">
-      <div className="bg-white px-5 pt-14 pb-4 border-b border-gray-100">
+      <div className="bg-white px-5 safe-top pb-4 border-b border-gray-100">
         <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
         <p className="text-sm text-gray-400 mt-0.5">Revenue & appointment history</p>
       </div>

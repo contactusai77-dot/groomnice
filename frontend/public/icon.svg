@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="115" fill="#7c3aed"/>
+  <!-- Scissors blades -->
+  <g transform="translate(256,256)" stroke="white" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Top blade -->
+    <path d="M-20,-110 L80,40" stroke-width="36"/>
+    <!-- Bottom blade -->
+    <path d="M-20,-110 L-80,40" stroke-width="36" transform="scale(-1,1)"/>
+    <!-- Pivot screw -->
+    <circle cx="0" cy="-60" r="18" fill="white" stroke="none"/>
+    <!-- Handles top -->
+    <ellipse cx="100" cy="90" rx="32" ry="50" stroke-width="28" transform="rotate(-30,100,90)"/>
+    <ellipse cx="-100" cy="90" rx="32" ry="50" stroke-width="28" transform="rotate(30,-100,90)"/>
+  </g>
+</svg>
