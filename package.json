@@ -5,17 +5,36 @@
   "main": "webhook_receiver.js",
   "scripts": {
     "start": "node webhook_receiver.js",
-    "dev": "nodemon webhook_receiver.js"
+    "dev": "nodemon webhook_receiver.js",
+    "test:ui": "npx playwright test",
+    "test:ui:headed": "npx playwright test --headed",
+    "test:ui:report": "npx playwright show-report tests/ui-results/html"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "express": "^4.18.2",
-    "twilio": "^5.3.0",
-    "dotenv": "^16.4.5"
+    "twilio": "^5.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "nodemon": "^3.1.0"
   },
   "engines": {
     "node": ">=18"
-  }
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/contactusai77-dot/groomnice.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/contactusai77-dot/groomnice/issues"
+  },
+  "homepage": "https://github.com/contactusai77-dot/groomnice#readme"
 }

@@ -380,6 +380,7 @@ def run_seed(key: str = Query(...)):
             groomer_id=g.id, require_deposit=True, send_24h_reminder=True,
             send_gap_fill_text=True, deposit_amount=25.0,
             service_prices=DEFAULT_PRICES, working_hours=DEFAULT_WORKING_HOURS,
+            onboarding_complete=True,
         ))
 
         clients_data = [
