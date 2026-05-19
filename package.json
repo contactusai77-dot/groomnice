@@ -8,7 +8,9 @@
     "dev": "nodemon webhook_receiver.js",
     "test:ui": "npx playwright test",
     "test:ui:headed": "npx playwright test --headed",
-    "test:ui:report": "npx playwright show-report tests/ui-results/html"
+    "test:ui:report": "npx playwright show-report tests/ui-results/html",
+    "demo:record": "npx playwright test --config=playwright.demo.config.ts",
+    "demo:record:headed": "npx playwright test --config=playwright.demo.config.ts --headed"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
