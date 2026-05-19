@@ -10,7 +10,7 @@ from typing import Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -171,25 +171,7 @@ class ImportApplyRequest(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def normalize_phone(raw: str) -> str:
-    digits = "".join(c for c in raw if c.isdigit())
-    if len(digits) == 10:
-        return f"+1{digits}"
-    if len(digits) == 11 and digits.startswith("1"):
-        return f"+{digits}"
-    return f"+{digits}"
-
-def _slug_from(name: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
-    return s or "groomer"
-
-def _vaccine_ok(pet: Optional[PetProfile]) -> bool:
-    if not pet or not pet.rabies_expiry:
-        return False
-    try:
-        return datetime.fromisoformat(pet.rabies_expiry) > datetime.utcnow()
-    except ValueError:
-        return bool(pet.rabies_expiry)
+from helpers import haversine as _haversine, normalize_phone, slug_from as _slug_from, vaccine_ok as _vaccine_ok
 
 def _get_settings(db: Session, groomer_id: str) -> GroomerSettings:
     s = db.query(GroomerSettings).filter(GroomerSettings.groomer_id == groomer_id).first()
@@ -228,13 +210,6 @@ def _find_open_slots_today(db: Session, settings: GroomerSettings, groomer_id: s
 def _get_prices(db: Session, groomer_id: str) -> dict:
     s = _get_settings(db, groomer_id)
     return s.service_prices or DEFAULT_PRICES
-
-def _haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    R = 3958.8
-    dlat = math.radians(lat2 - lat1)
-    dlng = math.radians(lng2 - lng1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng / 2) ** 2
-    return R * 2 * math.asin(math.sqrt(a))
 
 async def _geocode(address: str) -> Optional[tuple]:
     token = os.getenv("MAPBOX_TOKEN")
@@ -680,7 +655,7 @@ def get_booking_slots(slug: str, db: Session = Depends(get_db)):
         booked = db.query(Booking).filter(
             Booking.groomer_id == g.id,
             func.date(Booking.appointment_date) == d,
-            Booking.status.notin_(["declined", "canceled"]),
+            Booking.status.notin_(["declined", "cancelled"]),
         ).all()
         booked_times = {b.appointment_date.strftime("%H:%M") for b in booked if b.appointment_date}
 
@@ -728,6 +703,18 @@ async def online_booking(slug: str, req: OnlineBookingRequest, db: Session = Dep
         appt_dt = datetime.combine(d, dt_time(h, m))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid slot_date or slot_time")
+
+    # Validate the requested slot falls within the groomer's working hours
+    settings = _get_settings(db, g.id)
+    wh = settings.working_hours or DEFAULT_WORKING_HOURS
+    if d.weekday() not in wh.get("days", [0, 1, 2, 3, 4]):
+        raise HTTPException(status_code=400, detail="Groomer is not available on that day")
+    sh, sm = map(int, wh.get("start", "09:00").split(":"))
+    eh, em = map(int, wh.get("end", "17:00").split(":"))
+    slot_start_min = h * 60 + m
+    slot_dur_min = wh.get("slot_minutes", 60)
+    if slot_start_min < sh * 60 + sm or slot_start_min + slot_dur_min > eh * 60 + em:
+        raise HTTPException(status_code=400, detail="Slot is outside groomer's working hours")
 
     # Reject if this exact slot is already taken
     conflict = db.query(Booking).filter(
@@ -1055,7 +1042,7 @@ async def get_route_today(
         Booking.groomer_id == groomer.id,
         Booking.appointment_date >= today_start,
         Booking.appointment_date < tomorrow,
-        Booking.status.notin_(["canceled", "declined"]),
+        Booking.status.notin_(["cancelled", "declined"]),
     ).all()
 
     stops = []
@@ -1252,9 +1239,12 @@ def submit_feedback(body: FeedbackCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/api/admin/feedback")
-def admin_feedback(admin_key: str = Query(...), db: Session = Depends(get_db)):
-    if admin_key != ADMIN_KEY:
-        raise HTTPException(status_code=403, detail="Forbidden")
+def admin_feedback(
+    x_admin_key: Optional[str] = Header(None),
+    admin_key: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    _require_admin(x_admin_key, admin_key)
     rows = db.query(Feedback).order_by(Feedback.created_at.desc()).all()
     return [
         {"id": f.id, "email": f.email, "type": f.type, "message": f.message,
@@ -1312,7 +1302,6 @@ def _require_admin(x_admin_key: Optional[str] = None, admin_key: Optional[str] =
     if key != ADMIN_KEY:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-from fastapi import Header
 
 @app.get("/api/admin/overview")
 def admin_overview(
@@ -1412,6 +1401,53 @@ def admin_groomer_detail(
         "clients": client_list,
         "recent_bookings": booking_list,
     }
+
+
+# ── Admin test runner ─────────────────────────────────────────────────────────
+
+import json as _json
+import subprocess
+import sys as _sys
+
+_RESULTS_PATH = Path(__file__).parent.parent / "tests" / "results" / "latest.json"
+_RUN_ALL_PATH = Path(__file__).parent.parent / "tests" / "run_all.py"
+
+
+@app.get("/api/admin/test-results")
+def admin_test_results(
+    x_admin_key: Optional[str] = Header(None),
+    admin_key: Optional[str] = Query(None),
+):
+    _require_admin(x_admin_key, admin_key)
+    if not _RESULTS_PATH.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No test results yet. POST /api/admin/run-tests to generate them.",
+        )
+    return _json.loads(_RESULTS_PATH.read_text(encoding="utf-8"))
+
+
+@app.post("/api/admin/run-tests")
+def admin_run_tests(
+    x_admin_key: Optional[str] = Header(None),
+    admin_key: Optional[str] = Query(None),
+):
+    _require_admin(x_admin_key, admin_key)
+    if not _RUN_ALL_PATH.exists():
+        raise HTTPException(status_code=404, detail="tests/run_all.py not found")
+    _RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            [_sys.executable, str(_RUN_ALL_PATH)],
+            capture_output=True, text=True, timeout=300,
+            cwd=str(Path(__file__).parent.parent),
+            env={**os.environ, "PYTHONUTF8": "1"},
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Test run timed out (>5 min)")
+    if not _RESULTS_PATH.exists():
+        raise HTTPException(status_code=500, detail="Tests ran but produced no results file")
+    return _json.loads(_RESULTS_PATH.read_text(encoding="utf-8"))
 
 
 # ── Serve React build ─────────────────────────────────────────────────────────

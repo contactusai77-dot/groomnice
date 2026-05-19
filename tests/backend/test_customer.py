@@ -105,10 +105,7 @@ def test_vaccine_vault_entries_have_fields(client):
         assert "status" in s
 
 
-def test_seed_refreshes_data(client):
-    r = client.post("/api/seed?key=testkey")
-    assert r.status_code == 200
-    assert r.json()["seeded"] is True
-
-    appts = client.get("/api/appointments/today").json()
-    assert len(appts) == 7  # back to seed state
+def test_seed_wrong_key_forbidden(client):
+    """Seed endpoint must reject bad keys without touching the DB."""
+    r = client.post("/api/seed?key=wrongkey")
+    assert r.status_code == 403

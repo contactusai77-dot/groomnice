@@ -52,17 +52,24 @@ def test_confirm_expired_vaccine_sends_expired_flag(client, today_appointments):
         assert expired_arg is True
 
 
-def test_confirm_valid_vaccine_no_reminder(client, today_appointments):
-    """Biscuit has a valid vaccine — no reminder should fire."""
-    biscuit = next(
-        (a for a in today_appointments if a["pet_name"] == "Biscuit" and a["vaccine_ok"]),
-        None,
-    )
-    if biscuit is None:
-        import pytest; pytest.skip("Biscuit with valid vaccine not in seed data")
+def test_confirm_valid_vaccine_no_reminder(client):
+    """Pet with a future rabies expiry must NOT trigger a vaccine reminder on confirm."""
+    booking_id = _make_booking(client, "555-300-9900", name="Valid Vax Owner", pet="HealthyPup")
+
+    # Find the freshly-created pet and give it a known future vaccine expiry
+    clients = client.get("/api/clients").json()
+    vax_client = next((c for c in clients if c["name"] == "Valid Vax Owner"), None)
+    if vax_client and vax_client.get("pets"):
+        pet_id = vax_client["pets"][0]["id"]
+        client.patch(f"/api/pets/{pet_id}", json={
+            "pet_name": "HealthyPup", "breed": "Retriever",
+            "age": "2 years", "weight": "40 lbs",
+            "notes": "", "temperament": "friendly",
+            "rabies_expiry": "2099-01-01",
+        })
 
     with patch("main.send_vaccine_reminder") as mock_sms:
-        client.patch(f"/api/bookings/{biscuit['id']}/status", json={"status": "confirmed"})
+        client.patch(f"/api/bookings/{booking_id}/status", json={"status": "confirmed"})
         mock_sms.assert_not_called()
 
 

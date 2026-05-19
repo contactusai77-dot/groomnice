@@ -1,0 +1,31 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "-p", "no:warnings",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m not slow')",
+    "unit: pure unit tests, no DB or network",
+    "integration: tests that require a running FastAPI TestClient",
+    "e2e: end-to-end tests that require a live server on localhost:8002",
+]
+
+[tool.coverage.run]
+source = ["backend"]
+omit = ["backend/seed.py", "backend/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+fail_under = 60
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
