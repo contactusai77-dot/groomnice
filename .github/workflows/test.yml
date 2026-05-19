@@ -1,0 +1,89 @@
+name: Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    name: Unit & Integration Tests (Python 3.11)
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: sqlite:///./test_groomer.db
+      SEED_KEY: testkey
+      ANTHROPIC_API_KEY: test-fake-key
+      ADMIN_KEY: admin-dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt pytest pytest-cov
+
+      - name: Run unit tests
+        id: unit
+        run: |
+          python -m pytest tests/unit/ -v --tb=short -p no:warnings \
+            --junit-xml=test-results-unit.xml 2>&1 | tee unit-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+      - name: Run integration tests
+        id: integration
+        run: |
+          python -m pytest tests/backend/ -v --tb=short -p no:warnings \
+            --junit-xml=test-results-integration.xml 2>&1 | tee integration-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
+      - name: Write summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Unit tests summary
+          UNIT_PASS=$(grep -oP '\d+(?= passed)' unit-output.txt | tail -1 || echo 0)
+          UNIT_FAIL=$(grep -oP '\d+(?= failed)' unit-output.txt | tail -1 || echo 0)
+          UNIT_ERR=$(grep -oP '\d+(?= error)' unit-output.txt | tail -1 || echo 0)
+
+          if [ "${UNIT_FAIL:-0}" -eq 0 ] && [ "${UNIT_ERR:-0}" -eq 0 ]; then
+            echo "### Unit Tests ✅ $UNIT_PASS passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Unit Tests ❌ $UNIT_PASS passed, $UNIT_FAIL failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Integration tests summary
+          INT_PASS=$(grep -oP '\d+(?= passed)' integration-output.txt | tail -1 || echo 0)
+          INT_FAIL=$(grep -oP '\d+(?= failed)' integration-output.txt | tail -1 || echo 0)
+          INT_ERR=$(grep -oP '\d+(?= error)' integration-output.txt | tail -1 || echo 0)
+
+          if [ "${INT_FAIL:-0}" -eq 0 ] && [ "${INT_ERR:-0}" -eq 0 ]; then
+            echo "### Integration Tests ✅ $INT_PASS passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Integration Tests ❌ $INT_PASS passed, $INT_FAIL failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Railway auto-deploys on push to \`master\` after this check passes._" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload JUnit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.run_number }}
+          path: |
+            test-results-unit.xml
+            test-results-integration.xml
+            unit-output.txt
+            integration-output.txt
+          retention-days: 14
