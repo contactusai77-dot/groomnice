@@ -1,6 +1,7 @@
-import { CheckCircle, DollarSign, MessageCircle, Scissors, ShieldAlert, X } from "lucide-react";
+import { CalendarDays, CheckCircle, DollarSign, MessageCircle, Scissors, ShieldAlert, X } from "lucide-react";
 import { useState } from "react";
 import { AppointmentData, api } from "../api/client";
+import RescheduleModal from "./RescheduleModal";
 import StatusBadge from "./StatusBadge";
 
 type BadgeStatus = "ready" | "missing_vaccine" | "missing_deposit" | "in_progress" | "completed" | "canceled" | "pending_payment" | "pending_review";
@@ -22,6 +23,7 @@ interface Props {
 
 export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
   const [shareStatus, setShareStatus] = useState<"idle" | "copied">("idle");
+  const [rescheduling, setRescheduling] = useState(false);
 
   const time = a.appointment_date
     ? new Date(a.appointment_date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
@@ -127,7 +129,22 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
               onClick={handleRequestVaccine}
             />
           )}
+          <Btn
+            icon={<CalendarDays size={15} />}
+            label="Reschedule"
+            color="gray"
+            onClick={() => setRescheduling(true)}
+          />
         </div>
+      )}
+
+      {rescheduling && (
+        <RescheduleModal
+          bookingId={a.id}
+          clientName={a.client_name}
+          onClose={() => setRescheduling(false)}
+          onSaved={() => { setRescheduling(false); onUpdate(); }}
+        />
       )}
     </div>
   );

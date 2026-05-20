@@ -46,6 +46,39 @@ export async function setPetTemperament(
   });
 }
 
+/**
+ * Injects a floating caption overlay into the page — visible in Playwright video recordings.
+ * style 'scenario' = purple header; 'note' = dark tooltip.
+ */
+export async function showCaption(
+  page: Page,
+  text: string,
+  durationMs = 2800,
+  style: "note" | "scenario" = "note"
+) {
+  const bgColor =
+    style === "scenario" ? "rgba(109,40,217,0.95)" : "rgba(17,17,17,0.88)";
+  await page.evaluate(
+    ({ text, bgColor }) => {
+      document.getElementById("__caption__")?.remove();
+      const el = document.createElement("div");
+      el.id = "__caption__";
+      el.style.cssText = `
+        position:fixed; bottom:100px; left:50%; transform:translateX(-50%);
+        background:${bgColor}; color:#fff; padding:12px 28px; border-radius:14px;
+        font-size:16px; font-weight:600; z-index:99999; max-width:84%;
+        text-align:center; font-family:system-ui,sans-serif;
+        box-shadow:0 4px 24px rgba(0,0,0,.4); pointer-events:none;
+      `;
+      el.textContent = text;
+      document.body.appendChild(el);
+    },
+    { text, bgColor }
+  );
+  await page.waitForTimeout(durationMs);
+  await page.evaluate(() => document.getElementById("__caption__")?.remove());
+}
+
 /** Slow cinematic login with deliberate pauses for recording. */
 export async function loginAsGroomer(page: Page) {
   await page.goto("/login");

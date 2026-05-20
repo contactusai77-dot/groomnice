@@ -5,6 +5,7 @@ export default defineConfig({
   outputDir: "./demo/recordings",
   retries: 0,
   workers: 1,
+  timeout: 120_000,
   use: {
     baseURL: "http://localhost:4000",
     video: "on",

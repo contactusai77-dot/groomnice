@@ -161,6 +161,18 @@ export interface SettingsData {
   working_hours: WorkingHours;
   onboarding_complete: boolean;
   is_mobile: boolean;
+  blocked_dates?: string[];
+}
+
+export interface BlockDateResult {
+  blocked_dates: string[];
+  conflicts: Array<{ id: string; client_name: string; appointment_date: string | null }>;
+}
+
+export interface AvailabilitySlots {
+  date: string;
+  slots: string[];
+  blocked?: boolean;
 }
 
 export interface WaitlistEntryData {
@@ -326,6 +338,20 @@ export const api = {
     request<PriceEstimate>("/price-estimate", { method: "POST", body: JSON.stringify(data) }),
 
   getRoute: () => request<RouteData>("/route/today"),
+
+  // Availability / day overrides
+  getBlockedDates: () => request<{ blocked_dates: string[] }>("/availability/blocked-dates"),
+  blockDate: (date: string) =>
+    request<BlockDateResult>("/availability/block", { method: "POST", body: JSON.stringify({ date }) }),
+  unblockDate: (date: string) =>
+    request<{ blocked_dates: string[] }>(`/availability/block/${date}`, { method: "DELETE" }),
+  getAvailabilitySlots: (date: string) =>
+    request<AvailabilitySlots>(`/availability/slots?date=${date}`),
+  rescheduleBooking: (id: string, slot_date: string, slot_time: string) =>
+    request<{ success: boolean; appointment_date: string }>(`/bookings/${id}/reschedule`, {
+      method: "PATCH",
+      body: JSON.stringify({ slot_date, slot_time }),
+    }),
 
   submitFeedback: (data: { email: string; type: string; message: string }) =>
     request<{ success: boolean }>("/feedback", { method: "POST", body: JSON.stringify(data) }),

@@ -168,6 +168,13 @@ class ImportApplyRequest(BaseModel):
     rows: list[dict]
     mapping: dict[str, str]
 
+class BlockDateRequest(BaseModel):
+    date: str  # "YYYY-MM-DD"
+
+class RescheduleRequest(BaseModel):
+    slot_date: str  # "YYYY-MM-DD"
+    slot_time: str  # "HH:MM"
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -631,6 +638,162 @@ def update_status(
     return {"success": True}
 
 
+# ── Reschedule ────────────────────────────────────────────────────────────────
+
+@app.patch("/api/bookings/{booking_id}/reschedule")
+def reschedule_booking(
+    booking_id: str,
+    req: RescheduleRequest,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    b = db.query(Booking).filter(Booking.id == booking_id, Booking.groomer_id == groomer.id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    try:
+        d = date.fromisoformat(req.slot_date)
+        h, m = map(int, req.slot_time.split(":"))
+        new_dt = datetime.combine(d, dt_time(h, m))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid slot_date or slot_time")
+
+    s = _get_settings(db, groomer.id)
+    wh = s.working_hours or DEFAULT_WORKING_HOURS
+
+    if d.weekday() not in wh.get("days", [0, 1, 2, 3, 4]):
+        raise HTTPException(status_code=400, detail="Groomer is not available on that day")
+
+    sh, sm2 = map(int, wh.get("start", "09:00").split(":"))
+    eh, em = map(int, wh.get("end", "17:00").split(":"))
+    slot_start_min = h * 60 + m
+    slot_dur_min = wh.get("slot_minutes", 60)
+    if slot_start_min < sh * 60 + sm2 or slot_start_min + slot_dur_min > eh * 60 + em:
+        raise HTTPException(status_code=400, detail="Slot is outside working hours")
+
+    if req.slot_date in (s.blocked_dates or []):
+        raise HTTPException(status_code=400, detail="That date is blocked")
+
+    conflict = db.query(Booking).filter(
+        Booking.groomer_id == groomer.id,
+        Booking.id != booking_id,
+        Booking.appointment_date == new_dt,
+        Booking.status.notin_(["declined", "cancelled"]),
+    ).first()
+    if conflict:
+        raise HTTPException(status_code=409, detail="That slot is already taken")
+
+    b.appointment_date = new_dt
+    db.commit()
+    return {"success": True, "appointment_date": new_dt.isoformat()}
+
+
+# ── Day-level availability overrides ─────────────────────────────────────────
+
+@app.get("/api/availability/blocked-dates")
+def get_blocked_dates(
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    s = _get_settings(db, groomer.id)
+    return {"blocked_dates": s.blocked_dates or []}
+
+
+@app.post("/api/availability/block")
+def block_date(
+    req: BlockDateRequest,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    try:
+        d = date.fromisoformat(req.date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format — use YYYY-MM-DD")
+
+    conflicts = db.query(Booking).filter(
+        Booking.groomer_id == groomer.id,
+        func.date(Booking.appointment_date) == d,
+        Booking.status.notin_(["declined", "cancelled"]),
+    ).all()
+
+    s = _get_settings(db, groomer.id)
+    blocked = list(s.blocked_dates or [])
+    if req.date not in blocked:
+        blocked.append(req.date)
+        s.blocked_dates = sorted(blocked)
+        db.commit()
+
+    return {
+        "blocked_dates": s.blocked_dates,
+        "conflicts": [
+            {
+                "id": b.id,
+                "client_name": b.client.name if b.client else "",
+                "appointment_date": b.appointment_date.isoformat() if b.appointment_date else None,
+            }
+            for b in conflicts
+        ],
+    }
+
+
+@app.delete("/api/availability/block/{block_date_str}")
+def unblock_date(
+    block_date_str: str,
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    s = _get_settings(db, groomer.id)
+    s.blocked_dates = [d for d in (s.blocked_dates or []) if d != block_date_str]
+    db.commit()
+    return {"blocked_dates": s.blocked_dates}
+
+
+@app.get("/api/availability/slots")
+def get_groomer_slots(
+    target_date: str = Query(..., alias="date"),
+    db: Session = Depends(get_db),
+    groomer: Groomer = Depends(get_current_groomer),
+):
+    """Open slots on a specific date for the groomer's own reschedule picker."""
+    try:
+        d = date.fromisoformat(target_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format — use YYYY-MM-DD")
+
+    s = _get_settings(db, groomer.id)
+    wh = s.working_hours or DEFAULT_WORKING_HOURS
+
+    if d.weekday() not in wh.get("days", [0, 1, 2, 3, 4]):
+        return {"date": target_date, "slots": []}
+    if target_date in (s.blocked_dates or []):
+        return {"date": target_date, "slots": [], "blocked": True}
+
+    sh, sm = map(int, wh.get("start", "09:00").split(":"))
+    eh, em = map(int, wh.get("end", "17:00").split(":"))
+    slot_min = wh.get("slot_minutes", 60)
+
+    booked_times = {
+        b.appointment_date.strftime("%H:%M")
+        for b in db.query(Booking).filter(
+            Booking.groomer_id == groomer.id,
+            func.date(Booking.appointment_date) == d,
+            Booking.status.notin_(["declined", "cancelled"]),
+        ).all()
+        if b.appointment_date
+    }
+
+    slots = []
+    cur = sh * 60 + sm
+    end = eh * 60 + em
+    while cur + slot_min <= end:
+        label = f"{cur // 60:02d}:{cur % 60:02d}"
+        if label not in booked_times:
+            slots.append(label)
+        cur += slot_min
+
+    return {"date": target_date, "slots": slots}
+
+
 # ── Online booking (public, routed by groomer slug) ───────────────────────────
 
 @app.get("/api/book/{slug}/slots")
@@ -647,11 +810,14 @@ def get_booking_slots(slug: str, db: Session = Depends(get_db)):
 
     today = date.today()
     now = datetime.utcnow()
+    blocked = s.blocked_dates or []
     result = []
 
-    for delta in range(7):
+    for delta in range(30):
         d = today + timedelta(days=delta)
         if d.weekday() not in work_days:
+            continue
+        if d.isoformat() in blocked:
             continue
         booked = db.query(Booking).filter(
             Booking.groomer_id == g.id,

@@ -1,30 +1,30 @@
 /**
  * Demo: Deposit Protection for No-Shows
  *
- * Pre-seeded scenario:
- *   • Settings: require_deposit=true, deposit_amount=$25
+ * Three scenarios shown back-to-back:
+ *   Scenario A — Client pays deposit upfront → status flips to "Ready"
+ *   Scenario B — Client books but skips deposit → "No Deposit" warning badge
+ *                → groomer collects cash on arrival → Mark Paid → "Ready"
+ *   Scenario C — Confirmed client is a no-show → appointment cancelled
+ *                → $25 deposit is already collected and kept by the groomer
+ *
+ * Pre-seeded state (from /api/seed):
+ *   • require_deposit=true, deposit_amount=25
  *   • Ashley Chen / Mochi (Nail Trim, 10:30) — pending_payment → "No Deposit"
  *   • Derek Walsh / Baxter (Bath & Cut, 14:30) — pending_payment → "No Deposit"
- *   • A new "Sarah Murphy / Max" booking (confirmed, deposit paid) that we
- *     later cancel to demonstrate the no-show flow.
- *
- * Recording flow:
- *   1. Settings → show $25 deposit requirement
- *   2. Dashboard → "No Deposit" badges on Ashley + Derek
- *   3. Derek receives cash → click "Mark Paid" → flips to "Ready"
- *   4. Sarah Murphy booking — client is a no-show → API marks cancelled
- *   5. Dashboard refresh → "Cancelled" badge, $25 deposit is kept
+ *   • Sarah Murphy / Max — created in beforeAll as a confirmed booking (deposit
+ *     already paid) that we cancel mid-demo to show the no-show flow.
  */
 import { test, expect } from "@playwright/test";
-import { loginAsGroomer, seedFresh } from "./helpers";
+import { loginAsGroomer, seedFresh, showCaption } from "./helpers";
 
 let noShowBookingId = "";
 
 test.beforeAll(async ({ request }) => {
   const token = await seedFresh(request);
 
-  // Create a "Sarah Murphy" booking pre-confirmed (deposit already paid)
-  const res = await request.post("/api/bookings/quick", {
+  // Create Sarah Murphy as a quick-book (confirmed, deposit paid)
+  await request.post("/api/bookings/quick", {
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     data: {
       phone: "5550009911",
@@ -35,25 +35,21 @@ test.beforeAll(async ({ request }) => {
     },
   });
 
-  if (res.ok()) {
-    const data = await res.json();
-    // quick-book creates "confirmed" bookings; store the booking id for later cancel
-    // We need to find the booking via appointments list
-  }
-
-  // Fetch today's appointments to find Sarah's booking id
+  // Find Sarah's booking id
   const appts = await request.get("/api/appointments/today", {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const list = await appts.json() as any[];
+  const list = (await appts.json()) as any[];
   const sarah = list.find(a => a.client_name === "Sarah Murphy");
   if (sarah) noShowBookingId = sarah.id;
 });
 
-test("deposit protection & no-show workflow", async ({ page }) => {
+test("deposit protection & no-show — 3 scenarios", async ({ page }) => {
   await loginAsGroomer(page);
 
-  // ── Step 1: Settings — show deposit is required ($25) ────────────────────────
+  // ── Settings: show $25 deposit requirement ────────────────────────────────────
+  await showCaption(page, "$25 deposit required to hold every appointment slot", 2800, "scenario");
+
   await page.getByRole("button", { name: /settings/i }).click();
   await page.waitForTimeout(1000);
 
@@ -62,55 +58,72 @@ test("deposit protection & no-show workflow", async ({ page }) => {
   await depositSection.scrollIntoViewIfNeeded();
   await page.waitForTimeout(1200);
 
-  // Show deposit amount input
-  const depositInput = page.locator("input[type='number']").filter({ hasText: "" }).first();
   const depositToggle = page.locator("input[type='checkbox']").first();
   if (await depositToggle.isVisible({ timeout: 2000 })) {
     await depositToggle.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1000);
   }
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(800);
 
-  // ── Step 2: Dashboard — show "No Deposit" badges ─────────────────────────────
+  // ── Navigate to dashboard ─────────────────────────────────────────────────────
   await page.getByRole("button", { name: /^today$/i }).click()
     .catch(() => page.goto("/"));
   await page.waitForURL(/\/(dashboard|today|\?|$)/, { timeout: 10_000 });
   await page.waitForTimeout(1200);
 
-  // Scroll through cards until "No Deposit" badge is visible
+  // ── Scenario A: Client paid deposit → "Ready" badge ──────────────────────────
+  await showCaption(page, "Scenario A: Client pays deposit online → slot confirmed ✅", 3000, "scenario");
+  await page.waitForTimeout(500);
+
+  // Look for a "Ready" badge (confirmed booking = deposit ok)
+  const readyBadge = page.getByText("Ready").first();
+  if (await readyBadge.isVisible({ timeout: 5000 })) {
+    await readyBadge.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(1500);
+  }
+  await showCaption(page, "Deposit collected — groomer can focus on grooming", 2400, "note");
+
+  // ── Scenario B: No deposit paid → "No Deposit" badge ─────────────────────────
+  await showCaption(page, "Scenario B: Client books but skips the deposit payment", 3000, "scenario");
+
+  await page.mouse.wheel(0, 300);
+  await page.waitForTimeout(600);
+
   const noDepositBadge = page.getByText(/no deposit/i).first();
   if (await noDepositBadge.isVisible({ timeout: 5000 })) {
     await noDepositBadge.scrollIntoViewIfNeeded();
     await page.waitForTimeout(1000);
   }
 
-  // Scroll down further to find Derek / Baxter's Mark Paid button
-  await page.mouse.wheel(0, 300);
-  await page.waitForTimeout(600);
+  await showCaption(page, "⚠️  'No Deposit' badge flags the risk before the appointment", 2800, "note");
+
+  // Client pays in cash on arrival → Mark Paid
+  await page.mouse.wheel(0, 200);
+  await page.waitForTimeout(500);
 
   const markPaidBtn = page.getByRole("button", { name: /mark paid/i }).first();
   if (await markPaidBtn.isVisible({ timeout: 5000 })) {
     await markPaidBtn.scrollIntoViewIfNeeded();
     await markPaidBtn.hover();
     await page.waitForTimeout(800);
-
-    // ── Step 3: Client pays — click Mark Paid ────────────────────────────────
+    await showCaption(page, "Client arrives and pays cash → groomer clicks 'Mark Paid'", 2600, "note");
     await markPaidBtn.click();
     await page.waitForTimeout(1500);
 
-    // Badge should now be "Ready"
-    const readyBadge = page.getByText("Ready").first();
-    if (await readyBadge.isVisible({ timeout: 5000 })) {
-      await readyBadge.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(1200);
+    const readyAfterPay = page.getByText("Ready").first();
+    if (await readyAfterPay.isVisible({ timeout: 5000 })) {
+      await readyAfterPay.scrollIntoViewIfNeeded();
+      await showCaption(page, "✅ Badge flips to 'Ready' — appointment proceeds", 2600, "note");
     }
   }
 
-  // ── Step 4: Sarah Murphy no-show — cancel via API and reload ─────────────────
+  // ── Scenario C: No-show — cancel via API and reload ──────────────────────────
+  await showCaption(page, "Scenario C: Confirmed client doesn't show up", 3000, "scenario");
+
   if (noShowBookingId) {
     await page.evaluate(async (id) => {
       const t = localStorage.getItem("token") ?? "";
-      await fetch(`/api/bookings/${id}/status`, {  // PATCH → cancelled
+      await fetch(`/api/bookings/${id}/status`, {
         method: "PATCH",
         headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
         body: JSON.stringify({ status: "cancelled" }),
@@ -121,11 +134,20 @@ test("deposit protection & no-show workflow", async ({ page }) => {
     await page.waitForURL(/\/(dashboard|today|\?|$)/, { timeout: 10_000 });
     await page.waitForTimeout(1200);
 
-    // Show the cancelled card — $25 deposit was already taken and kept
+    await showCaption(page, "Groomer marks the appointment cancelled", 2400, "note");
+
     const cancelledBadge = page.getByText(/cancel/i).first();
     if (await cancelledBadge.isVisible({ timeout: 5000 })) {
       await cancelledBadge.scrollIntoViewIfNeeded();
-      await page.waitForTimeout(1800);
+      await page.waitForTimeout(1000);
     }
+
+    await showCaption(
+      page,
+      "✅ Appointment cancelled — $25 deposit already collected & kept",
+      3400,
+      "scenario"
+    );
+    await page.waitForTimeout(1000);
   }
 });

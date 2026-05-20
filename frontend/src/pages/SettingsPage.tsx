@@ -1,6 +1,6 @@
-import { Trash2 } from "lucide-react";
+import { CalendarOff, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { SettingsData, WaitlistEntryData, WorkingHours, api } from "../api/client";
+import { BlockDateResult, SettingsData, WaitlistEntryData, WorkingHours, api } from "../api/client";
 
 const SERVICES = ["Full Groom", "Bath & Cut", "Bath", "Nail Trim", "Puppy Cut", "De-shed"];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -11,10 +11,15 @@ export default function SettingsPage() {
   const [waitlist, setWaitlist] = useState<WaitlistEntryData[]>([]);
   const [wlForm, setWlForm] = useState({ phone: "", name: "" });
   const [wlAdding, setWlAdding] = useState(false);
+  const [blockedDates, setBlockedDates] = useState<string[]>([]);
+  const [blockInput, setBlockInput] = useState("");
+  const [blockConflicts, setBlockConflicts] = useState<BlockDateResult["conflicts"]>([]);
+  const [blockPending, setBlockPending] = useState(false);
 
   useEffect(() => {
     api.getSettings().then(setSettings);
     api.getWaitlist().then(setWaitlist);
+    api.getBlockedDates().then(r => setBlockedDates(r.blocked_dates));
   }, []);
 
   async function save(updated: SettingsData) {
@@ -62,6 +67,26 @@ export default function SettingsPage() {
     if (!settings) return;
     const current = settings.working_hours.slot_minutes;
     save({ ...settings, working_hours: { ...settings.working_hours, slot_minutes: current === 60 ? 30 : 60 } });
+  }
+
+  async function handleBlockDate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!blockInput) return;
+    setBlockPending(true);
+    try {
+      const result = await api.blockDate(blockInput);
+      setBlockedDates(result.blocked_dates);
+      setBlockConflicts(result.conflicts);
+      setBlockInput("");
+    } finally {
+      setBlockPending(false);
+    }
+  }
+
+  async function handleUnblockDate(d: string) {
+    const result = await api.unblockDate(d);
+    setBlockedDates(result.blocked_dates);
+    setBlockConflicts([]);
   }
 
   async function addWaitlist(e: React.FormEvent) {
@@ -208,6 +233,70 @@ export default function SettingsPage() {
           checked={settings.send_gap_fill_text}
           onToggle={() => toggle("send_gap_fill_text")}
         />
+
+        <Section title="Day Overrides" />
+
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3">
+          <p className="text-xs text-gray-400">
+            Block specific dates — they won't appear in your online booking page.
+          </p>
+
+          {blockedDates.length > 0 && (
+            <div className="space-y-2">
+              {blockedDates.map(d => (
+                <div key={d} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CalendarOff size={14} className="text-red-400" />
+                    <span className="text-sm font-medium text-gray-700">
+                      {new Date(d + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                    </span>
+                    <span className="text-xs text-red-400 font-medium">Blocked</span>
+                  </div>
+                  <button
+                    onClick={() => handleUnblockDate(d)}
+                    className="text-xs text-violet-600 font-medium active:opacity-60"
+                  >
+                    Unblock
+                  </button>
+                </div>
+              ))}
+              <hr className="border-gray-100" />
+            </div>
+          )}
+
+          <form onSubmit={handleBlockDate} className="flex gap-2">
+            <input
+              type="date"
+              value={blockInput}
+              min={new Date().toISOString().slice(0, 10)}
+              onChange={e => { setBlockInput(e.target.value); setBlockConflicts([]); }}
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-violet-400"
+            />
+            <button
+              type="submit"
+              disabled={!blockInput || blockPending}
+              className="px-3 py-2 bg-red-500 text-white rounded-xl text-sm font-semibold disabled:opacity-40 active:bg-red-600 transition"
+            >
+              Block
+            </button>
+          </form>
+
+          {blockConflicts.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
+              <p className="text-xs font-semibold text-amber-700">
+                ⚠️  {blockConflicts.length} existing appointment{blockConflicts.length > 1 ? "s" : ""} on this day — reschedule them manually:
+              </p>
+              {blockConflicts.map(c => (
+                <p key={c.id} className="text-xs text-amber-600">
+                  {c.client_name} —{" "}
+                  {c.appointment_date
+                    ? new Date(c.appointment_date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+                    : "TBD"}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
 
         <Section title="Gap Fill Waitlist" />
 

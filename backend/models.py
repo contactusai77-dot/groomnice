@@ -135,5 +135,6 @@ class GroomerSettings(Base):
     working_hours = Column(JSON, nullable=True)
     onboarding_complete = Column(Boolean, default=False)
     is_mobile = Column(Boolean, default=False)
+    blocked_dates = Column(JSON, nullable=True)  # list of "YYYY-MM-DD" strings
 
     groomer = relationship("Groomer", back_populates="settings")
