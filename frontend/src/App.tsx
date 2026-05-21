@@ -12,9 +12,11 @@ import OnboardingPage from "./pages/OnboardingPage";
 import PaymentCancel from "./pages/PaymentCancel";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import PetProfile from "./pages/PetProfile";
+import PrivacyPage from "./pages/PrivacyPage";
 import RegisterPage from "./pages/RegisterPage";
 import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
+import TermsPage from "./pages/TermsPage";
 import VaccineUpload from "./pages/VaccineUpload";
 import VaccineVault from "./pages/VaccineVault";
 
@@ -43,6 +45,10 @@ function Layout() {
 
         {/* ── Groomer onboarding (protected) ── */}
         <Route path="/onboarding" element={<ProtectedRoute><OnboardingPage /></ProtectedRoute>} />
+
+        {/* ── Legal (public) ── */}
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
 
         {/* ── Customer-facing (public) ── */}
         <Route path="/book/:slug" element={<BookingForm />} />

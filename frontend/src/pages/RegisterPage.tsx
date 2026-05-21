@@ -12,6 +12,8 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
+  const [tosAccepted, setTosAccepted] = useState(false);
+  const [dataConsent, setDataConsent] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -31,7 +33,7 @@ export default function RegisterPage() {
     setLoading(true);
     setError("");
     try {
-      const result = await api.register(email, password, name, slug);
+      const result = await api.register(email, password, name, slug, tosAccepted, dataConsent);
       login(result.token, result.groomer);
       navigate("/");
     } catch (err) {
@@ -89,9 +91,47 @@ export default function RegisterPage() {
           </div>
         </div>
 
+        {/* Consent checkboxes */}
+        <div className="space-y-3 pt-1">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={tosAccepted}
+              onChange={e => setTosAccepted(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-violet-600 shrink-0"
+              required
+            />
+            <span className="text-sm text-gray-600">
+              I agree to the{" "}
+              <a href="/terms" target="_blank" className="text-violet-600 underline font-medium">
+                Terms of Service
+              </a>
+              . I understand that Groomnice is a scheduling platform, AI outputs may contain errors,
+              and my liability for any claims is capped at fees paid.
+            </span>
+          </label>
+
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={dataConsent}
+              onChange={e => setDataConsent(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-violet-600 shrink-0"
+              required
+            />
+            <span className="text-sm text-gray-600">
+              I consent to Groomnice collecting and processing my business data (client records,
+              appointments, uploaded files) to provide the service, as described in the{" "}
+              <a href="/privacy" target="_blank" className="text-violet-600 underline font-medium">
+                Privacy Policy
+              </a>.
+            </span>
+          </label>
+        </div>
+
         {error && <p className="text-red-500 text-sm text-center">{error}</p>}
 
-        <button type="submit" disabled={loading}
+        <button type="submit" disabled={loading || !tosAccepted || !dataConsent}
           className="w-full bg-violet-600 text-white py-3.5 rounded-xl font-semibold text-base disabled:opacity-50 transition active:bg-violet-700">
           {loading ? "Creating account…" : "Create Account"}
         </button>

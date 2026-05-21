@@ -77,8 +77,13 @@ function VaccineCard({ submission: s, onConfirm }: { submission: VaultSubmission
           <p className="text-sm text-gray-400 mb-3">{s.client_name}</p>
 
           <label className="block text-xs font-medium text-gray-500 mb-1">
-            Expiry Date {s.ai_expiry ? "(AI pre-filled)" : "(enter manually)"}
+            Expiry Date {s.ai_expiry ? "(AI pre-filled — verify against certificate)" : "(enter manually)"}
           </label>
+          {s.ai_expiry && (
+            <p className="text-xs text-amber-600 mb-2">
+              ⚠️ AI can make mistakes — always confirm against the physical certificate before saving.
+            </p>
+          )}
           <input
             type="date"
             value={expiry}

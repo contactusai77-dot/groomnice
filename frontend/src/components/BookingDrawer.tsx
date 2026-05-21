@@ -187,6 +187,9 @@ export default function BookingDrawer({ open, onClose, onSuccess, initialTime }:
                   <span className="text-xs text-green-600">{estimate.duration_minutes} min</span>
                 </div>
                 <p className="text-xs text-green-600 mt-0.5">{estimate.notes}</p>
+                <p className="text-xs text-amber-600 mt-2 pt-2 border-t border-green-100">
+                  ⚠️ AI estimate — verify before quoting the client.
+                </p>
               </div>
             )}
 

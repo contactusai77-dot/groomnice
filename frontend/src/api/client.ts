@@ -217,10 +217,10 @@ export interface VaultSubmission {
 
 export const api = {
   // Auth
-  register: (email: string, password: string, name: string, slug: string) =>
+  register: (email: string, password: string, name: string, slug: string, tos_accepted: boolean, data_consent: boolean) =>
     request<AuthResult>("/auth/register", {
       method: "POST",
-      body: JSON.stringify({ email, password, name, slug }),
+      body: JSON.stringify({ email, password, name, slug, tos_accepted, data_consent }),
     }),
 
   login: (email: string, password: string) =>

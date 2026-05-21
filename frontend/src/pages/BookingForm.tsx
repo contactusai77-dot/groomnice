@@ -20,6 +20,7 @@ export default function BookingForm() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [petName, setPetName] = useState("");
+  const [clientConsent, setClientConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -123,9 +124,25 @@ export default function BookingForm() {
               placeholder="Biscuit" className={inp} />
           </div>
 
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={clientConsent}
+              onChange={e => setClientConsent(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-violet-600 shrink-0"
+              required
+            />
+            <span className="text-xs text-gray-500">
+              I agree to the{" "}
+              <a href="/terms" target="_blank" className="text-violet-600 underline">Terms of Service</a>.
+              I understand Groomnice is a scheduling platform only, not responsible for grooming
+              services, and that AI-generated information may contain errors.
+            </span>
+          </label>
+
           {error && <p className="text-red-500 text-sm text-center">{error}</p>}
 
-          <button type="submit" disabled={submitting}
+          <button type="submit" disabled={submitting || !clientConsent}
             className="w-full bg-violet-600 text-white py-4 rounded-2xl font-semibold text-base active:bg-violet-700 transition disabled:opacity-50 flex items-center justify-center gap-2 mt-2">
             {submitting ? "Sending…" : <><span>Request Appointment</span><ChevronRight size={18} /></>}
           </button>

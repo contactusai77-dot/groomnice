@@ -72,6 +72,8 @@ class RegisterRequest(BaseModel):
     password: str
     name: str
     slug: str  # URL-safe business handle, e.g. "sarahs-paws"
+    tos_accepted: bool = False
+    data_consent: bool = False
 
 class LoginRequest(BaseModel):
     email: str
@@ -288,16 +290,23 @@ def health():
 
 @app.post("/api/auth/register", status_code=201)
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    if not req.tos_accepted:
+        raise HTTPException(status_code=400, detail="You must accept the Terms of Service to create an account")
+    if not req.data_consent:
+        raise HTTPException(status_code=400, detail="Data processing consent is required to use Groomnice")
     if db.query(Groomer).filter(Groomer.email == req.email.lower()).first():
         raise HTTPException(status_code=409, detail="Email already registered")
     slug = req.slug.lower().strip() or _slug_from(req.name)
     if db.query(Groomer).filter(Groomer.slug == slug).first():
         raise HTTPException(status_code=409, detail="Slug already taken — try another")
+    now = datetime.utcnow()
     groomer = Groomer(
         email=req.email.lower(),
         password_hash=hash_password(req.password),
         name=req.name,
         slug=slug,
+        tos_accepted_at=now,
+        data_consent_at=now,
     )
     db.add(groomer)
     db.flush()

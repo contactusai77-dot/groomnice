@@ -19,6 +19,8 @@ class Groomer(Base):
     slug = Column(String, unique=True, index=True, nullable=False)  # /book/{slug}
     google_id = Column(String, unique=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    tos_accepted_at = Column(DateTime, nullable=True)
+    data_consent_at = Column(DateTime, nullable=True)
 
     clients = relationship("Client", back_populates="groomer")
     settings = relationship("GroomerSettings", back_populates="groomer", uselist=False)
