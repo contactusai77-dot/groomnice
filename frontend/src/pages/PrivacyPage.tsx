@@ -55,8 +55,8 @@ export default function PrivacyPage() {
             <p>
               We retain your data for as long as your account is active. You may request deletion
               of your account and associated data by emailing{" "}
-              <a href="mailto:support@groomnice.com" className="text-violet-600 underline">
-                support@groomnice.com
+              <a href="mailto:contactusai77@gmail.com" className="text-violet-600 underline">
+                contactusai77@gmail.com
               </a>. We will delete your data within 30 days of a valid request.
             </p>
           </Section>
@@ -89,8 +89,8 @@ export default function PrivacyPage() {
               <li>Export your client data (available in Clients → Export)</li>
             </ul>
             <p className="mt-2">
-              Contact <a href="mailto:support@groomnice.com" className="text-violet-600 underline">
-                support@groomnice.com
+              Contact <a href="mailto:contactusai77@gmail.com" className="text-violet-600 underline">
+                contactusai77@gmail.com
               </a> to exercise any of these rights.
             </p>
           </Section>

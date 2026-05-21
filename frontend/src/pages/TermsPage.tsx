@@ -107,8 +107,8 @@ export default function TermsPage() {
           <Section title="10. Contact">
             <p>
               Questions about these Terms? Contact us at{" "}
-              <a href="mailto:support@groomnice.com" className="text-violet-600 underline">
-                support@groomnice.com
+              <a href="mailto:contactusai77@gmail.com" className="text-violet-600 underline">
+                contactusai77@gmail.com
               </a>
             </p>
           </Section>
