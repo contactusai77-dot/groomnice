@@ -50,9 +50,16 @@ def send_booking_request_received(phone: str, name: str) -> bool:
     return send_sms(phone, f"Hi {name}! We received your booking request and will confirm within the hour.")
 
 
-def send_gap_notification(phone: str, name: str, times: list) -> bool:
+def send_new_booking_alert(groomer_phone: str, client_name: str, service: str, slot_date: str, slot_time: str) -> bool:
+    return send_sms(
+        groomer_phone,
+        f"New booking request from {client_name}: {service} on {slot_date} at {slot_time}. Open Groomnice to approve.",
+    )
+
+
+def send_gap_notification(phone: str, name: str, times: list, slug: str = "") -> bool:
     time_str = ", ".join(times[:3])
-    url = f"{_base()}/book"
+    url = f"{_base()}/book/{slug}" if slug else _base()
     return send_sms(phone, f"Hi {name}! A slot just opened up today ({time_str}). Book here: {url}")
 
 

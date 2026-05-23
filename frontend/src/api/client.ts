@@ -162,11 +162,13 @@ export interface SettingsData {
   onboarding_complete: boolean;
   is_mobile: boolean;
   blocked_dates?: string[];
+  notification_phone: string;
 }
 
 export interface BlockDateResult {
   blocked_dates: string[];
   conflicts: Array<{ id: string; client_name: string; appointment_date: string | null }>;
+  auto_declined: Array<{ id: string; client_name: string }>;
 }
 
 export interface AvailabilitySlots {
@@ -313,6 +315,9 @@ export const api = {
       slot_time: string;
     },
   ) => request<OnlineBookingResult>(`/book/${slug}`, { method: "POST", body: JSON.stringify(data) }),
+
+  getBookingStatus: (bookingId: string) =>
+    request<{ status: string; appointment_date: string | null; service_type: string }>(`/book/status/${bookingId}`),
 
   // Settings
   getSettings: () => request<SettingsData>("/settings"),

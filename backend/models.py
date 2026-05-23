@@ -138,5 +138,6 @@ class GroomerSettings(Base):
     onboarding_complete = Column(Boolean, default=False)
     is_mobile = Column(Boolean, default=False)
     blocked_dates = Column(JSON, nullable=True)  # list of "YYYY-MM-DD" strings
+    notification_phone = Column(String, nullable=True)  # groomer's phone for new booking alerts
 
     groomer = relationship("Groomer", back_populates="settings")

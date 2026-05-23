@@ -25,9 +25,13 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
   const [shareStatus, setShareStatus] = useState<"idle" | "copied">("idle");
   const [rescheduling, setRescheduling] = useState(false);
 
-  const time = a.appointment_date
-    ? new Date(a.appointment_date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+  const apptDate = a.appointment_date ? new Date(a.appointment_date) : null;
+  const time = apptDate
+    ? apptDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "TBD";
+  const dateLabel = apptDate
+    ? apptDate.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
+    : "";
 
   async function handleRequestVaccine() {
     const url = `${window.location.origin}/vaccine/${a.intake_token}${a.pet_id ? `?pet_id=${a.pet_id}` : ""}`;
@@ -80,6 +84,9 @@ export default function AppointmentCard({ appointment: a, onUpdate }: Props) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
+            {isPending && dateLabel && (
+              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">{dateLabel}</span>
+            )}
             <span className="text-xl font-bold text-gray-800">{time}</span>
             <span className="text-sm text-gray-400">{a.service_type}</span>
             {a.source === "online" && (

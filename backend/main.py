@@ -28,6 +28,7 @@ from services.sms import (
     send_booking_request_received,
     send_gap_notification,
     send_intake_link,
+    send_new_booking_alert,
     send_vaccine_link,
     send_vaccine_reminder,
 )
@@ -128,6 +129,7 @@ class SettingsUpdate(BaseModel):
     working_hours: Optional[dict] = None
     onboarding_complete: Optional[bool] = None
     is_mobile: Optional[bool] = None
+    notification_phone: Optional[str] = None
 
 class OnlineBookingRequest(BaseModel):
     phone: str
@@ -473,13 +475,24 @@ def get_today_appointments(
     groomer: Groomer = Depends(get_current_groomer),
 ):
     today = date.today()
-    bookings = (
+    today_bookings = (
         db.query(Booking)
         .filter(Booking.groomer_id == groomer.id, func.date(Booking.appointment_date) == today)
         .all()
     )
-    result = [_booking_dict(b) for b in bookings]
-    return sorted(result, key=lambda x: x["appointment_date"] or "")
+    # Also surface pending requests for future dates so groomer sees them immediately
+    future_pending = (
+        db.query(Booking)
+        .filter(
+            Booking.groomer_id == groomer.id,
+            func.date(Booking.appointment_date) > today,
+            Booking.status == "pending_review",
+        )
+        .all()
+    )
+    result = [_booking_dict(b) for b in today_bookings + future_pending]
+    # pending_review always floats to top, then sorted by date
+    return sorted(result, key=lambda x: (0 if x["status"] == "pending_review" else 1, x["appointment_date"] or ""))
 
 
 @app.get("/api/appointments/history")
@@ -633,6 +646,7 @@ def update_status(
     b.status = body.status
     db.commit()
     if body.status == "confirmed" and b.client:
+        send_booking_confirmation(b.client.phone, b.client.name)
         pet = b.pet or (b.client.pet_profiles[0] if b.client.pet_profiles else None)
         if not _vaccine_ok(pet):
             expired = bool(pet and pet.rabies_expiry)
@@ -643,7 +657,7 @@ def update_status(
             open_slots = _find_open_slots_today(db, settings, groomer.id)
             if open_slots:
                 for entry in db.query(WaitlistEntry).filter(WaitlistEntry.groomer_id == groomer.id).all():
-                    send_gap_notification(entry.phone, entry.name, open_slots)
+                    send_gap_notification(entry.phone, entry.name, open_slots, slug=groomer.slug)
     return {"success": True}
 
 
@@ -730,17 +744,31 @@ def block_date(
     if req.date not in blocked:
         blocked.append(req.date)
         s.blocked_dates = sorted(blocked)
-        db.commit()
+
+    # Auto-decline pending requests for this day — they were never committed
+    auto_declined = []
+    need_reschedule = []
+    for b in conflicts:
+        if b.status == "pending_review":
+            b.status = "declined"
+            auto_declined.append(b)
+        else:
+            need_reschedule.append(b)
+    db.commit()
 
     return {
         "blocked_dates": s.blocked_dates,
+        "auto_declined": [
+            {"id": b.id, "client_name": b.client.name if b.client else ""}
+            for b in auto_declined
+        ],
         "conflicts": [
             {
                 "id": b.id,
                 "client_name": b.client.name if b.client else "",
                 "appointment_date": b.appointment_date.isoformat() if b.appointment_date else None,
             }
-            for b in conflicts
+            for b in need_reschedule
         ],
     }
 
@@ -891,6 +919,8 @@ async def online_booking(slug: str, req: OnlineBookingRequest, db: Session = Dep
     slot_dur_min = wh.get("slot_minutes", 60)
     if slot_start_min < sh * 60 + sm or slot_start_min + slot_dur_min > eh * 60 + em:
         raise HTTPException(status_code=400, detail="Slot is outside groomer's working hours")
+    if req.slot_date in (settings.blocked_dates or []):
+        raise HTTPException(status_code=400, detail="Groomer is not available on that date")
 
     # Reject if this exact slot is already taken
     conflict = db.query(Booking).filter(
@@ -918,8 +948,23 @@ async def online_booking(slug: str, req: OnlineBookingRequest, db: Session = Dep
 
     send_booking_request_received(client.phone, client.name)
     send_vaccine_link(client.phone, client.name, client.intake_token)
+    if settings.notification_phone:
+        send_new_booking_alert(settings.notification_phone, req.name, req.service_type, req.slot_date, req.slot_time)
 
     return {"booking_id": booking.id, "intake_token": client.intake_token, "status": "pending_review"}
+
+
+@app.get("/api/book/status/{booking_id}")
+def get_booking_status(booking_id: str, db: Session = Depends(get_db)):
+    """Public endpoint — client polls this to know when groomer confirms/declines."""
+    b = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not b:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    return {
+        "status": b.status,
+        "appointment_date": b.appointment_date.isoformat() if b.appointment_date else None,
+        "service_type": b.service_type,
+    }
 
 
 # ── Clients ───────────────────────────────────────────────────────────────────
@@ -1176,6 +1221,7 @@ def get_settings(
         "working_hours": s.working_hours or DEFAULT_WORKING_HOURS,
         "onboarding_complete": bool(s.onboarding_complete),
         "is_mobile": bool(s.is_mobile),
+        "notification_phone": s.notification_phone or "",
     }
 
 

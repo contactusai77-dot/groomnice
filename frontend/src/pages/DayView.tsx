@@ -1,5 +1,5 @@
-import { CalendarDays, List, Navigation, Plus, Scissors } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Bell, CalendarDays, List, Navigation, Plus, RefreshCw, Scissors } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppointmentData, RouteData, RouteStop, SettingsData, WorkingHours, api } from "../api/client";
 import AppointmentCard from "../components/AppointmentCard";
@@ -41,6 +41,8 @@ export default function DayView() {
   const [drawerTime, setDrawerTime] = useState<string | undefined>(undefined);
   const [route, setRoute] = useState<RouteData | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState(Date.now());
+  const prevPendingRef = useRef(0);
 
   const today = new Date().toLocaleDateString("en-US", {
     weekday: "long", month: "long", day: "numeric",
@@ -59,6 +61,15 @@ export default function DayView() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Auto-refresh every 30s; flash the refresh icon when new pending requests arrive
+  useEffect(() => {
+    const id = setInterval(() => {
+      load().then(() => setLastRefresh(Date.now()));
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const pendingCount = appointments.filter(a => a.status === "pending_review").length;
   const ready = appointments.filter(a => a.ready).length;
   const earned = appointments
     .filter(a => a.status === "completed")
@@ -98,6 +109,9 @@ export default function DayView() {
             {earned > 0 && (
               <span className="text-sm font-semibold text-green-600">${earned} today</span>
             )}
+            <span title={`Last updated ${new Date(lastRefresh).toLocaleTimeString()}`}>
+              <RefreshCw size={13} className="text-gray-300" />
+            </span>
             {/* List / Calendar / Route toggle */}
             <div className="flex border border-gray-200 rounded-xl overflow-hidden">
               <button onClick={() => switchView("list")}
@@ -121,6 +135,15 @@ export default function DayView() {
           </p>
         )}
       </div>
+
+      {pendingCount > 0 && (
+        <div className="mx-4 mt-3 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 animate-pulse">
+          <Bell size={18} className="text-amber-500 shrink-0" />
+          <p className="text-sm font-semibold text-amber-800">
+            {pendingCount} booking request{pendingCount > 1 ? "s" : ""} waiting for your approval
+          </p>
+        </div>
+      )}
 
       <div className="px-4 py-4 space-y-3">
         {loading ? (

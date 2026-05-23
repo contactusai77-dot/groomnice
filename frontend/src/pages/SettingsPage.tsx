@@ -14,6 +14,7 @@ export default function SettingsPage() {
   const [blockedDates, setBlockedDates] = useState<string[]>([]);
   const [blockInput, setBlockInput] = useState("");
   const [blockConflicts, setBlockConflicts] = useState<BlockDateResult["conflicts"]>([]);
+  const [autoDeclined, setAutoDeclined] = useState<BlockDateResult["auto_declined"]>([]);
   const [blockPending, setBlockPending] = useState(false);
 
   useEffect(() => {
@@ -77,6 +78,7 @@ export default function SettingsPage() {
       const result = await api.blockDate(blockInput);
       setBlockedDates(result.blocked_dates);
       setBlockConflicts(result.conflicts);
+      setAutoDeclined(result.auto_declined ?? []);
       setBlockInput("");
     } finally {
       setBlockPending(false);
@@ -87,6 +89,7 @@ export default function SettingsPage() {
     const result = await api.unblockDate(d);
     setBlockedDates(result.blocked_dates);
     setBlockConflicts([]);
+    setAutoDeclined([]);
   }
 
   async function addWaitlist(e: React.FormEvent) {
@@ -234,6 +237,20 @@ export default function SettingsPage() {
           onToggle={() => toggle("send_gap_fill_text")}
         />
 
+        <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-2">
+          <label className="block text-sm font-medium text-gray-700">Your notification phone</label>
+          <p className="text-xs text-gray-400">Get a text when a client books online. Leave blank to disable.</p>
+          <input
+            type="tel"
+            inputMode="tel"
+            value={settings.notification_phone}
+            placeholder="+1 555 000 0000"
+            onChange={e => setSettings(s => s ? { ...s, notification_phone: e.target.value } : s)}
+            onBlur={() => settings && save(settings)}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 bg-gray-50 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
+          />
+        </div>
+
         <Section title="Day Overrides" />
 
         <div className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm space-y-3">
@@ -281,10 +298,21 @@ export default function SettingsPage() {
             </button>
           </form>
 
+          {autoDeclined.length > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-1">
+              <p className="text-xs font-semibold text-green-700">
+                Auto-declined {autoDeclined.length} pending request{autoDeclined.length > 1 ? "s" : ""} for this day:
+              </p>
+              {autoDeclined.map(c => (
+                <p key={c.id} className="text-xs text-green-600">{c.client_name}</p>
+              ))}
+            </div>
+          )}
+
           {blockConflicts.length > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
               <p className="text-xs font-semibold text-amber-700">
-                ⚠️  {blockConflicts.length} existing appointment{blockConflicts.length > 1 ? "s" : ""} on this day — reschedule them manually:
+                ⚠️  {blockConflicts.length} confirmed appointment{blockConflicts.length > 1 ? "s" : ""} on this day — reschedule them manually:
               </p>
               {blockConflicts.map(c => (
                 <p key={c.id} className="text-xs text-amber-600">

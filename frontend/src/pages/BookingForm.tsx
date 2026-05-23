@@ -1,11 +1,13 @@
-import { CalendarDays, Check, ChevronRight, Clock } from "lucide-react";
-import { useEffect, useState } from "react";
+import { CalendarDays, Check, ChevronRight, Clock, Loader2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { BookingSlot, api } from "../api/client";
 
 const SERVICES = ["Bath", "Bath & Cut", "Nail Trim", "Full Groom", "Puppy Cut", "De-shed"];
+const POLL_INTERVAL = 5_000; // 5 seconds
 
 type Step = "pick" | "info" | "done";
+type BookingStatus = "pending_review" | "confirmed" | "declined" | null;
 
 export default function BookingForm() {
   const { slug } = useParams<{ slug: string }>();
@@ -24,6 +26,10 @@ export default function BookingForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  const [bookingId, setBookingId] = useState<string | null>(null);
+  const [bookingStatus, setBookingStatus] = useState<BookingStatus>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (!slug) { setLoadingSlots(false); return; }
     api.getBookingSlots(slug)
@@ -31,6 +37,23 @@ export default function BookingForm() {
       .catch(() => setSlots([]))
       .finally(() => setLoadingSlots(false));
   }, [slug]);
+
+  // Poll for status changes after submission
+  useEffect(() => {
+    if (!bookingId || bookingStatus === "confirmed" || bookingStatus === "declined") {
+      if (pollRef.current) clearInterval(pollRef.current);
+      return;
+    }
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api.getBookingStatus(bookingId);
+        if (res.status !== "pending_review") {
+          setBookingStatus(res.status as BookingStatus);
+        }
+      } catch { /* ignore */ }
+    }, POLL_INTERVAL);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [bookingId, bookingStatus]);
 
   const selectedDaySlots = slots.find(s => s.date === selectedDate)?.slots ?? [];
 
@@ -44,7 +67,7 @@ export default function BookingForm() {
     setSubmitting(true);
     setError("");
     try {
-      await api.onlineBook(slug ?? "demo", {
+      const res = await api.onlineBook(slug ?? "demo", {
         phone,
         name,
         pet_name: petName,
@@ -52,6 +75,8 @@ export default function BookingForm() {
         slot_date: selectedDate,
         slot_time: selectedTime,
       });
+      setBookingId(res.booking_id);
+      setBookingStatus("pending_review");
       setStep("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -73,20 +98,65 @@ export default function BookingForm() {
   }
 
   if (step === "done") {
+    if (bookingStatus === "confirmed") {
+      return (
+        <Screen>
+          <div className="text-center">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Check size={32} className="text-green-600" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-1">Confirmed!</h2>
+            <p className="text-gray-500 text-sm mb-4">
+              Your <strong>{service}</strong> on{" "}
+              <strong>{formatDate(selectedDate)}</strong> at{" "}
+              <strong>{formatTime(selectedTime)}</strong> is confirmed.
+            </p>
+            <div className="bg-green-50 border border-green-100 rounded-2xl p-4 text-sm text-green-800">
+              See you then! Bring your pet's vaccine record if you haven't uploaded it yet.
+            </div>
+          </div>
+        </Screen>
+      );
+    }
+
+    if (bookingStatus === "declined") {
+      return (
+        <Screen>
+          <div className="text-center">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <X size={32} className="text-red-500" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-1">Not Available</h2>
+            <p className="text-gray-500 text-sm mb-4">
+              Sorry, that slot is no longer available. Please go back and pick another time.
+            </p>
+            <button
+              onClick={() => { setStep("pick"); setBookingStatus(null); setBookingId(null); }}
+              className="w-full bg-violet-600 text-white py-4 rounded-2xl font-semibold"
+            >
+              Pick Another Time
+            </button>
+          </div>
+        </Screen>
+      );
+    }
+
+    // pending_review — waiting for groomer
     return (
       <Screen>
         <div className="text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Check size={32} className="text-green-600" />
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <Loader2 size={32} className="text-amber-500 animate-spin" />
           </div>
           <h2 className="text-2xl font-bold text-gray-800 mb-1">Request Sent!</h2>
           <p className="text-gray-500 text-sm mb-4">
-            We'll confirm your <strong>{service}</strong> on{" "}
+            Waiting for your groomer to confirm your{" "}
+            <strong>{service}</strong> on{" "}
             <strong>{formatDate(selectedDate)}</strong> at{" "}
-            <strong>{formatTime(selectedTime)}</strong> within the hour.
+            <strong>{formatTime(selectedTime)}</strong>.
           </p>
           <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 text-sm text-violet-800 text-left">
-            Check your phone — we'll text you a confirmation and a link to upload your pet's vaccine record.
+            This page checks for updates automatically — it will flip to "Confirmed!" the moment your groomer approves.
           </div>
         </div>
       </Screen>
