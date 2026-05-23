@@ -3,6 +3,8 @@ import AdminPage from "./pages/AdminPage";
 import BottomNav from "./components/BottomNav";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { AuthProvider } from "./context/AuthContext";
+import { PendingProvider } from "./context/PendingContext";
+import RequestsPage from "./pages/RequestsPage";
 import BookingForm from "./pages/BookingForm";
 import Clients from "./pages/Clients";
 import DayView from "./pages/DayView";
@@ -20,7 +22,7 @@ import TermsPage from "./pages/TermsPage";
 import VaccineUpload from "./pages/VaccineUpload";
 import VaccineVault from "./pages/VaccineVault";
 
-const GROOMER_PATHS = ["/", "/clients", "/reports", "/settings", "/vault", "/onboarding"];
+const GROOMER_PATHS = ["/", "/requests", "/clients", "/reports", "/settings", "/vault", "/onboarding"];
 
 function Layout() {
   const { pathname } = useLocation();
@@ -40,6 +42,7 @@ function Layout() {
         <Route path="/" element={<ProtectedRoute><DayView /></ProtectedRoute>} />
         <Route path="/clients" element={<ProtectedRoute><Clients /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute><ReportsPage /></ProtectedRoute>} />
+        <Route path="/requests" element={<ProtectedRoute><RequestsPage /></ProtectedRoute>} />
         <Route path="/vault" element={<ProtectedRoute><VaccineVault /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
 
@@ -69,7 +72,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Layout />
+        <PendingProvider>
+          <Layout />
+        </PendingProvider>
       </AuthProvider>
     </BrowserRouter>
   );
